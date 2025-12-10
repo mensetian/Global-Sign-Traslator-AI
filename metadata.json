@@ -1,6 +1,6 @@
 {
-  "name": "Global Sign Translator",
-  "description": "Real-time American Sign Language (ASL) translator using Gemini Flash multimodal capabilities.",
+  "name": "Global Sign Translator (Gemini 3 Edition)",
+  "description": "Next-gen accessible communication tool powered by Google Gemini 3 Pro multimodal vision. Translates ASL to multiple languages in real-time with phonological parameter analysis.",
   "requestFramePermissions": [
     "camera"
   ]

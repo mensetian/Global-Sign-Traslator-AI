@@ -9,7 +9,10 @@ export const TRANSLATIONS = {
     checkPermissions: "Verifique los permisos de su navegador.",
     apiLimit: "Pausa por límite de API (10s)",
     apiLimitDesc: "Límite de cuota alcanzado",
-    reconnecting: "Reconectando..."
+    reconnecting: "Reconectando...",
+    paused: "SISTEMA PAUSADO",
+    resume: "REANUDAR",
+    pause: "PAUSAR"
   },
   English: {
     waiting: "WAITING FOR SIGNAL",
@@ -21,7 +24,10 @@ export const TRANSLATIONS = {
     checkPermissions: "Check your browser permissions.",
     apiLimit: "API Limit reached. Pausing (10s)",
     apiLimitDesc: "Quota limit reached",
-    reconnecting: "Reconnecting..."
+    reconnecting: "Reconnecting...",
+    paused: "SYSTEM PAUSED",
+    resume: "RESUME",
+    pause: "PAUSE"
   },
   Portuguese: {
     waiting: "AGUARDANDO SINAL",
@@ -33,7 +39,10 @@ export const TRANSLATIONS = {
     checkPermissions: "Verifique as permissões do navegador.",
     apiLimit: "Limite de API. Pausa (10s)",
     apiLimitDesc: "Limite de cota atingido",
-    reconnecting: "Reconectando..."
+    reconnecting: "Reconectando...",
+    paused: "SISTEMA PAUSADO",
+    resume: "RETOMAR",
+    pause: "PAUSAR"
   }
 };
 

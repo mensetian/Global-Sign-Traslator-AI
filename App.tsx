@@ -18,6 +18,12 @@ const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [isRateLimited, setIsRateLimited] = useState(false);
   
+  // INICIO SEGURO: Empezamos en PAUSA para no gastar cuota al cargar la página.
+  const [isPaused, setIsPaused] = useState(true); 
+  
+  // REF CRÍTICA: Mantiene el estado de pausa actualizado dentro de los timeouts asíncronos
+  const isPausedRef = useRef(isPaused);
+  
   const cameraRef = useRef<CameraFeedHandle>(null);
   const isRunningRef = useRef(true);
   const languageRef = useRef(targetLanguage);
@@ -25,12 +31,29 @@ const App: React.FC = () => {
   // Get current translation object
   const t = TRANSLATIONS[targetLanguage as LanguageCode] || TRANSLATIONS.Spanish;
 
+  // Sincronizar refs
   useEffect(() => {
     languageRef.current = targetLanguage;
   }, [targetLanguage]);
 
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+    
+    // Si quitamos la pausa, iniciamos el ciclo inmediatamente
+    if (!isPaused) {
+      setAppState(AppState.ANALYZING);
+      processFrame();
+    } else {
+      setAppState(AppState.IDLE);
+      setIsActive(false);
+    }
+  }, [isPaused]);
+
   const processFrame = useCallback(async () => {
-    if (!isRunningRef.current) return;
+    // CHEQUEO DE SEGURIDAD 1: Si la app se desmontó o está pausada (vía Ref), abortar.
+    if (!isRunningRef.current || isPausedRef.current) return;
+    
+    // Si estamos limitados por la API, no hacemos nada (el timeout de reintento lo manejará)
     if (isRateLimited) return;
 
     const imageSrc = cameraRef.current?.captureFrame();
@@ -43,19 +66,26 @@ const App: React.FC = () => {
       try {
         const result = await sendImageToGemini(imageSrc, languageRef.current);
         
+        // CHEQUEO DE SEGURIDAD 2: El usuario pudo haber pausado MIENTRAS esperábamos a Gemini
+        if (isPausedRef.current) {
+             setIsActive(false);
+             setAppState(AppState.IDLE);
+             return; // Matar el ciclo aquí
+        }
+        
         if (result.traduccion !== "..." && result.traduccion.trim() !== "") {
              setTranslationResult(result);
         }
         setAppState(AppState.SUCCESS);
 
         const elapsed = Date.now() - startTime;
-        // Aumentamos el delay base a 2000ms para respetar mejor la cuota gratuita (15 RPM)
-        // 2000ms + tiempo de proceso (~1000ms) = ~3s por petición = ~20 RPM (todavía alto pero mejor)
-        const minimumDelay = 2000; 
+        // Gemini 3 Pro delay
+        const minimumDelay = 3000; 
         const nextDelay = Math.max(0, minimumDelay - elapsed);
 
         setTimeout(() => {
-            if (isRunningRef.current) processFrame();
+            // CHEQUEO DE SEGURIDAD 3: Verificar Ref antes de reiniciar
+            if (isRunningRef.current && !isPausedRef.current) processFrame();
         }, nextDelay);
 
       } catch (error: any) {
@@ -70,96 +100,103 @@ const App: React.FC = () => {
           error?.response?.status === 429;
 
         if (isQuotaError) {
-          console.warn("Cuota de API excedida (429). Entrando en modo enfriamiento...");
+          console.warn("Cuota de API excedida (429).");
           setIsRateLimited(true);
-          // Esperar 10 segundos antes de reintentar
+          
+          // Lógica de reintento con verificación de PAUSA
           setTimeout(() => {
             setIsRateLimited(false);
-            if (isRunningRef.current) processFrame();
-          }, 10000);
+            // Solo reintentamos si el usuario NO ha pausado durante el tiempo de espera
+            if (isRunningRef.current && !isPausedRef.current) {
+                processFrame();
+            }
+          }, 12000); // 12 segundos de enfriamiento
         } else {
           console.error("Loop error:", error);
-          // Errores genéricos, reintento rápido
           setTimeout(() => {
-              if (isRunningRef.current) processFrame();
+              if (isRunningRef.current && !isPausedRef.current) processFrame();
           }, 1000);
         }
       } finally {
-        setIsActive(false);
+        if (!isPausedRef.current) {
+            setIsActive(false);
+        }
       }
     } else {
+      // Si la cámara no está lista, reintentar rápido
       setTimeout(() => {
-          if (isRunningRef.current) processFrame();
+          if (isRunningRef.current && !isPausedRef.current) processFrame();
       }, 500);
     }
-  }, [isRateLimited]);
+  }, [isRateLimited]); // Dependencias mínimas, usamos Refs para lo demás
 
-  useEffect(() => {
-    if (!isRateLimited && isRunningRef.current) {
-       // Loop recovery logic handled by recursive calls
-    }
-  }, [isRateLimited]);
-
+  // Cleanup al desmontar
   useEffect(() => {
     isRunningRef.current = true;
-    const timeoutId = setTimeout(() => {
-      processFrame();
-    }, 1000);
     return () => {
       isRunningRef.current = false;
-      clearTimeout(timeoutId);
     };
-  }, [processFrame]);
+  }, []);
 
   return (
     <div className="h-dvh w-screen bg-vibe-bg flex flex-col items-center justify-between overflow-hidden relative font-sans">
       
-      {/* 
-         HEADER: 
-         Adaptativo. 
-      */}
+      {/* HEADER INTEGRADO */}
       <div className={`
         w-full flex flex-col items-center pt-6 pb-2 px-4 z-40 space-y-4 
         bg-gradient-to-b from-vibe-bg to-transparent
-        
-        /* Landscape Mobile Override */
         landscape:absolute landscape:top-0 landscape:left-0 landscape:flex-row landscape:justify-end landscape:p-4 landscape:space-y-0 landscape:bg-none landscape:pointer-events-none
-        
-        /* Reset for Desktop */
         md:landscape:relative md:landscape:flex-col md:landscape:items-center md:landscape:justify-start md:landscape:bg-gradient-to-b md:landscape:pt-6 md:landscape:space-y-4 md:landscape:pointer-events-auto
       `}>
-        
-        {/* Título */}
-        <h1 className="text-white/30 font-light tracking-[0.3em] text-[10px] uppercase select-none landscape:hidden md:landscape:block">
-          Global Sign Translator <span className="text-vibe-neon opacity-50 ml-1">AI</span>
+        <h1 className="text-white/30 font-light tracking-[0.3em] text-[10px] uppercase select-none landscape:hidden md:landscape:block text-center">
+          Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Powered by Gemini 3 Pro</span>
         </h1>
 
-        {/* Selector de Idioma: Interactuable siempre */}
-        <div className="flex bg-white/5 backdrop-blur-md rounded-full p-1 border border-white/10 shadow-lg pointer-events-auto">
-          {LANGUAGES.map((lang) => (
-            <button
-              key={lang.code}
-              onClick={() => setTargetLanguage(lang.code)}
-              className={`
-                px-5 py-2 rounded-full text-xs font-bold tracking-wider transition-all duration-300
-                ${targetLanguage === lang.code 
-                  ? 'bg-vibe-neon text-black shadow-[0_0_15px_rgba(0,243,255,0.4)]' 
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'}
-              `}
-            >
-              {lang.label}
-            </button>
-          ))}
+        {/* CONTROLES SUPERIORES: Idioma + Power Button (Integrado) */}
+        <div className="flex items-center gap-3 bg-white/5 backdrop-blur-md rounded-full p-1 border border-white/10 shadow-lg pointer-events-auto">
+          {/* Selector de Idioma */}
+          <div className="flex">
+            {LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => setTargetLanguage(lang.code)}
+                className={`
+                  px-3 py-2 rounded-full text-[10px] font-bold tracking-wider transition-all duration-300
+                  ${targetLanguage === lang.code 
+                    ? 'bg-vibe-neon text-black shadow-[0_0_10px_rgba(0,243,255,0.3)]' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'}
+                `}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Divisor vertical */}
+          <div className="w-[1px] h-4 bg-white/10"></div>
+
+          {/* Power Toggle Button (Sutil y Escondido en el menú) */}
+          <button
+            onClick={() => setIsPaused(!isPaused)}
+            className={`
+              w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300
+              ${!isPaused 
+                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/40 hover:text-white' 
+                : 'bg-vibe-neon/10 text-vibe-neon hover:bg-vibe-neon/30 hover:text-white hover:shadow-[0_0_10px_rgba(0,243,255,0.4)]'}
+            `}
+            title={!isPaused ? t.pause : t.resume}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+              <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* 
-         MAIN CONTENT
-      */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 w-full max-w-2xl flex flex-col justify-center items-center relative px-0 md:px-4 landscape:max-w-none landscape:h-full">
         
-        {/* Contenedor de Cámara con Relación de Aspecto Variable */}
-        <div className="relative w-full landscape:h-full md:landscape:h-auto flex flex-col items-center">
+        <div className="relative w-full landscape:h-full md:landscape:h-auto flex flex-col items-center group">
           
           <CameraFeed 
             ref={cameraRef} 
@@ -168,11 +205,17 @@ const App: React.FC = () => {
             langCode={targetLanguage}
           />
 
-          {/* 
-            Alerta API 'Sutil':
-            Ubicada como un overlay sobre la parte superior del feed de cámara.
-          */}
-          {isRateLimited && (
+          {/* OVERLAY DE PAUSA (Minimalista) */}
+          {isPaused && (
+             <div className="absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px] rounded-3xl transition-all duration-500">
+                <div className="bg-black/40 px-6 py-2 rounded-full border border-white/5">
+                  <p className="text-white/50 text-xs tracking-[0.3em] font-light">{t.paused}</p>
+                </div>
+             </div>
+          )}
+
+          {/* Alerta API 'Sutil' */}
+          {isRateLimited && !isPaused && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-yellow-500/30 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></div>
@@ -182,11 +225,10 @@ const App: React.FC = () => {
                </div>
             </div>
           )}
+
         </div>
 
-        {/* 
-           RESULTADOS:
-        */}
+        {/* RESULTADOS */}
         <div className="absolute bottom-6 w-full px-4 md:static md:mt-4 md:px-0 z-30 landscape:bottom-2 landscape:w-3/4 landscape:max-w-lg">
           <ResultsDisplay 
             result={translationResult} 
@@ -196,7 +238,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Decoración de Fondo */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-vibe-neon rounded-full blur-[180px] opacity-10 pointer-events-none z-0 landscape:hidden md:landscape:block"></div>
     </div>
   );

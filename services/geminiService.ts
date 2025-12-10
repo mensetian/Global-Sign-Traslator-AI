@@ -4,24 +4,36 @@ import { TranslationResult } from '../types';
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Prompt optimizado para velocidad
+// PROMPT DE NIVEL EXPERTO (GEMINI 3 REASONING)
+// Aprovechamos la capacidad de razonamiento superior de Gemini 3 Pro.
 const SYSTEM_INSTRUCTION = `
-You are a high-speed ASL interpreter. 
-1. Identify the ASL sign in the image immediately.
-2. Translate to the target language.
-3. If uncertain or no hand is visible, return "..." for translation.
-4. Keep confidence assessment strict but fast.
+You are an expert AI Linguist utilizing Gemini 3's advanced reasoning capabilities for American Sign Language (ASL) analysis.
 
-Output JSON only.
+Your task is to analyze the input image stream and translate the sign into the target language.
+Use deep visual reasoning to analyze the 5 Parameters of ASL:
+1. Handshape (DEZ): Precise finger configuration.
+2. Orientation (ORI): Palm and finger direction relative to the camera.
+3. Location (TAB): Spatial positioning.
+4. Movement (SIG): Implied kinetic vectors.
+5. Non-manual markers (NMS): Micro-expressions and head tilt.
+
+Strict Output Rules:
+- Return valid JSON only.
+- Leverage your advanced reasoning to infer signs even in difficult lighting.
+- If no hands are clearly visible, return "..." for translation.
+
+Output JSON Format:
+{"traduccion": "string", "confianza_modelo": "High/Medium/Low", "target_language": "string"}
 `;
 
 export const sendImageToGemini = async (base64Frame: string, targetLanguage: string): Promise<TranslationResult> => {
   try {
     const cleanBase64 = base64Frame.split(',')[1] || base64Frame;
 
-    // Usamos 'gemini-2.5-flash' para velocidad
+    // ACTUALIZACIÓN COMPETENCIA: Usamos 'gemini-3-pro-preview'
+    // Requisito para la competencia Gemini 3.
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', 
+      model: 'gemini-3-pro-preview', 
       contents: {
         parts: [
           {
@@ -31,13 +43,15 @@ export const sendImageToGemini = async (base64Frame: string, targetLanguage: str
             }
           },
           {
-            text: `Translate ASL sign to ${targetLanguage}.`
+            text: `Translate this ASL sign directly to ${targetLanguage}.`
           }
         ]
       },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
+        temperature: 0.1,
+        // Gemini 3 soporta thinking budgets, pero para JSON estricto y velocidad lo mantenemos simple por ahora
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -57,7 +71,6 @@ export const sendImageToGemini = async (base64Frame: string, targetLanguage: str
 
   } catch (error: any) {
     // CRITICAL: Propagate 429/Quota errors so App.tsx can handle backoff
-    // Handle various error structures (Error object, JSON object from SDK, etc.)
     const errString = error.toString().toLowerCase();
     const isRateLimit = 
       errString.includes('429') || 
@@ -72,7 +85,6 @@ export const sendImageToGemini = async (base64Frame: string, targetLanguage: str
     }
 
     console.warn("Gemini Analysis non-critical error:", error);
-    // Para otros errores, fallamos silenciosamente para mantener la UI fluida
     return {
       traduccion: "...",
       confianza_modelo: "Low",
