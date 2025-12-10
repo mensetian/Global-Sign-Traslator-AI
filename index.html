@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Global Sign Translator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'vibe-bg': '#050505', // Ultra dark background
+              'vibe-surface': '#121212',
+              'vibe-neon': '#00f3ff', // Cyan/Blue Neon
+              'vibe-text': '#ffffff',
+            },
+            fontFamily: {
+              sans: ['Roboto', 'sans-serif'],
+            },
+            boxShadow: {
+              'neon': '0 0 20px rgba(0, 243, 255, 0.3)',
+              'neon-strong': '0 0 30px rgba(0, 243, 255, 0.6)',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #050505;
+        color: #ffffff;
+        overflow: hidden; /* Prevent scrolling for app-like feel */
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
