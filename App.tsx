@@ -196,9 +196,10 @@ const App: React.FC = () => {
       </div>
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 w-full max-w-2xl flex flex-col justify-center items-center relative px-0 md:px-4 landscape:max-w-none landscape:h-full">
+      <div className="flex-1 w-full max-w-4xl flex flex-col justify-center items-center relative px-0 md:px-4">
         
-        <div className="relative w-full landscape:h-full md:landscape:h-auto flex flex-col items-center group">
+        {/* Camera Container */}
+        <div className="relative w-full flex flex-col items-center group landscape:h-full md:landscape:h-auto md:max-w-3xl">
           
           <CameraFeed 
             ref={cameraRef} 
@@ -255,13 +256,18 @@ const App: React.FC = () => {
 
         </div>
 
-        {/* RESULTADOS */}
-        <div className="absolute bottom-6 w-full px-4 md:static md:mt-4 md:px-0 z-30 landscape:bottom-2 landscape:w-3/4 landscape:max-w-lg">
-          <ResultsDisplay 
-            result={translationResult} 
-            appState={appState} 
-            langCode={targetLanguage}
-          />
+        {/* RESULTADOS - FIXED FOR PC VISIBILITY */}
+        <div className={`
+            absolute bottom-6 left-0 right-0 z-50 px-4 w-full flex justify-center pointer-events-none
+            md:bottom-12
+        `}>
+          <div className="w-full max-w-xl pointer-events-auto">
+             <ResultsDisplay 
+                result={translationResult} 
+                appState={appState} 
+                langCode={targetLanguage}
+             />
+          </div>
         </div>
       </div>
 
