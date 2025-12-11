@@ -18,8 +18,8 @@ const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [isRateLimited, setIsRateLimited] = useState(false);
   
-  // INICIO SEGURO: Empezamos en PAUSA
-  const [isPaused, setIsPaused] = useState(true); 
+  // INICIO SEGURO: Empezamos en PLAY (false)
+  const [isPaused, setIsPaused] = useState(false); 
   
   const isPausedRef = useRef(isPaused);
   const cameraRef = useRef<CameraFeedHandle>(null);
@@ -195,11 +195,15 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div className="flex-1 w-full max-w-4xl flex flex-col justify-center items-center relative px-0 md:px-4">
+      {/* MAIN CONTENT 
+          CAMBIO: Aumentado max-w-4xl a max-w-7xl en pantallas grandes para ampliar la vista de escritorio 
+      */}
+      <div className="flex-1 w-full md:max-w-6xl lg:max-w-7xl flex flex-col justify-center items-center relative px-0 md:px-4">
         
-        {/* Camera Container */}
-        <div className="relative w-full flex flex-col items-center group landscape:h-full md:landscape:h-auto md:max-w-3xl">
+        {/* Camera Container 
+            CAMBIO: Eliminado md:max-w-3xl. Añadido md:max-h-[80vh] para controlar altura en escritorio.
+        */}
+        <div className="relative w-full flex flex-col items-center group landscape:h-full md:landscape:h-auto md:landscape:max-h-[75vh] lg:landscape:max-h-[80vh]">
           
           <CameraFeed 
             ref={cameraRef} 
@@ -208,7 +212,19 @@ const App: React.FC = () => {
             langCode={targetLanguage}
           />
 
-          <div className="absolute top-4 right-4 z-50">
+          <div className="absolute top-4 right-4 z-50 flex gap-3">
+            {/* Flip Camera Button */}
+            <button
+                onClick={() => cameraRef.current?.toggleCamera()}
+                className="w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 bg-black/40 text-white/80 hover:bg-white/10 hover:text-white transition-all duration-300 shadow-lg active:scale-90"
+                title="Cambiar Cámara"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+            </button>
+
+            {/* Play/Pause Button */}
             <button
               onClick={() => {
                 const newPausedState = !isPaused;

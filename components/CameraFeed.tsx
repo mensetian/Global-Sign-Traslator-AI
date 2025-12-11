@@ -10,6 +10,7 @@ interface CameraFeedProps {
 
 export interface CameraFeedHandle {
   captureFrame: () => string | null;
+  toggleCamera: () => void;
 }
 
 const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, langCode }, ref) => {
@@ -17,8 +18,48 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isPermissionDenied, setIsPermissionDenied] = useState(false);
+  
+  // GESTIÓN DE DISPOSITIVOS
+  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [isMirrored, setIsMirrored] = useState(false);
 
   const t = TRANSLATIONS[langCode as LanguageCode] || TRANSLATIONS.Spanish;
+
+  const updateDeviceList = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      setVideoDevices(videoInputs);
+      return videoInputs;
+    } catch (e) {
+      console.warn("Error listando dispositivos:", e);
+      return [];
+    }
+  };
+
+  const toggleCamera = async () => {
+    let currentDevices = videoDevices;
+    if (currentDevices.length === 0) {
+      currentDevices = await updateDeviceList();
+    }
+    
+    if (currentDevices.length < 2) return;
+    
+    const currentIndex = currentDevices.findIndex(d => d.deviceId === activeDeviceId);
+    // Si no encuentra el actual (-1), empieza por el 1 (asumiendo 0 era default).
+    // Si encuentra, pasa al siguiente.
+    let nextIndex = (currentIndex + 1) % currentDevices.length;
+    
+    // Safety check
+    if (!currentDevices[nextIndex]) nextIndex = 0;
+    
+    const nextDevice = currentDevices[nextIndex];
+    if (nextDevice) {
+       console.log("Cambiando cámara a:", nextDevice.label || nextDevice.deviceId);
+       setActiveDeviceId(nextDevice.deviceId);
+    }
+  };
 
   useImperativeHandle(ref, () => ({
     captureFrame: () => {
@@ -27,72 +68,141 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
       if (video && canvas) {
         const context = canvas.getContext('2d');
         if (context && video.videoWidth > 0) {
-          // OPTIMIZACIÓN AGRESIVA PARA RÁFAGA (BURST MODE)
-          // Bajamos a 320px de ancho. Suficiente para detectar manos, 
-          // pero hace que el payload de 3 imágenes sea ligero.
           const scaleFactor = 320 / video.videoWidth;
           canvas.width = 320;
           canvas.height = video.videoHeight * scaleFactor;
           
           context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          // Calidad 0.5: Balance perfecto entre velocidad de subida y nitidez
           return canvas.toDataURL('image/jpeg', 0.5); 
         }
       }
       return null;
-    }
+    },
+    toggleCamera
   }));
 
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => {
+          track.stop();
+          // Importante: En algunos Android antiguos, stop() no libera inmediatamente.
+      });
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  const getStream = async (constraints: MediaStreamConstraints): Promise<MediaStream | null> => {
+      try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+          console.warn("Fallo intento constraints:", constraints, e);
+          return null;
+      }
+  };
+
   const startCamera = async () => {
+    stopCamera(); 
     setStreamError(null);
     setIsPermissionDenied(false);
+    
+    let stream: MediaStream | null = null;
+    
     try {
-      // INTENTO 1: Configuración Ideal (Cámara frontal, frameRate alto)
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: 'user', 
-          width: { ideal: 640 }, // Capturamos a 640 pero reducimos en canvas
-          frameRate: { ideal: 30 } // Importante para capturar movimiento fluido
-        },
-        audio: false
-      });
+        // --- INTENTO 1: Configuración específica (ID o Environment + Calidad) ---
+        // Si hay activeDeviceId, usamos ese. Si no, 'environment'.
+        // Incluimos width ideal, pero sin 'exact' para no romper si la cámara no lo soporta.
+        const baseConstraints: MediaStreamConstraints = {
+            video: activeDeviceId 
+              ? { deviceId: { exact: activeDeviceId }, width: { ideal: 640 } }
+              : { facingMode: 'environment', width: { ideal: 640 } },
+            audio: false
+        };
+        
+        stream = await getStream(baseConstraints);
+
+        // --- INTENTO 2: Configuración relajada (Sin resolución) ---
+        // Si falló el anterior, probamos sin width/height. Muchas cámaras Wide fallan con restricciones.
+        if (!stream) {
+            console.log("Reintentando sin restricciones de resolución...");
+            const relaxedConstraints: MediaStreamConstraints = {
+                video: activeDeviceId 
+                  ? { deviceId: { exact: activeDeviceId } }
+                  : { facingMode: 'environment' },
+                audio: false
+            };
+            stream = await getStream(relaxedConstraints);
+        }
+
+        // --- INTENTO 3: Cualquier cámara trasera (si falló ID específico) ---
+        if (!stream && activeDeviceId) {
+             console.log("ID específico falló, probando environment genérico...");
+             // Reseteamos el ID activo porque evidentemente no funcionó
+             setActiveDeviceId(null); 
+             stream = await getStream({ video: { facingMode: 'environment' }, audio: false });
+        }
+
+        // --- INTENTO 4: Lo que sea (Fallback final) ---
+        if (!stream) {
+            console.log("Fallback final: video: true");
+            stream = await getStream({ video: true, audio: false });
+        }
+
+        // Si después de todo esto no hay stream, lanzamos error
+        if (!stream) {
+            throw new Error("Could not start video source after multiple attempts");
+        }
+      
+      // CONFIGURACIÓN DEL VIDEO
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Esperar a que cargue metadata para saber si está listo
+        videoRef.current.onloadedmetadata = () => {
+             videoRef.current?.play().catch(e => console.error("Error play:", e));
+        };
       }
-    } catch (err1) {
-      console.warn("Intento 1 de cámara falló, probando configuración básica...", err1);
-      try {
-        // INTENTO 2: Fallback Genérico
-        const streamFallback = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = streamFallback;
-        }
-      } catch (err2: any) {
-        console.error("Error fatal de cámara:", err2);
+      
+      // ANÁLISIS DEL STREAM ACTIVO (para actualizar UI y estado)
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      
+      if (!activeDeviceId && settings.deviceId) {
+         setActiveDeviceId(settings.deviceId);
+      }
+      
+      // Detección de espejo
+      if (settings.facingMode === 'user') {
+          setIsMirrored(true);
+      } else if (settings.facingMode === 'environment') {
+          setIsMirrored(false);
+      } else {
+          const label = track.label?.toLowerCase() || '';
+          setIsMirrored(label.includes('front') || label.includes('anterior') || label.includes('user'));
+      }
+      
+      await updateDeviceList();
+
+    } catch (err: any) {
+        console.error("Error fatal de cámara:", err);
         
-        // Detectar si es error de permisos
-        if (err2.name === 'NotAllowedError' || err2.name === 'PermissionDeniedError' || err2.message.includes('Permission denied')) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             setIsPermissionDenied(true);
         }
         
         setStreamError("ERROR_ACCESS");
-      }
     }
   };
 
   useEffect(() => {
-    startCamera();
-
+    // Pequeño delay para permitir que el DOM renderice y el componente anterior libere la cámara
+    const timer = setTimeout(() => {
+        startCamera();
+    }, 100);
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-      }
+        clearTimeout(timer);
+        stopCamera();
     };
-  }, []);
+  }, [activeDeviceId]); 
 
   return (
     <div 
@@ -121,7 +231,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
           </p>
 
           <button 
-            onClick={startCamera}
+            onClick={() => setActiveDeviceId(null)} 
             className="mt-6 px-6 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-full border border-white/20 transition-all active:scale-95"
           >
             {t.resume || "Reintentar"}
@@ -133,7 +243,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
           autoPlay
           playsInline
           muted
-          className="w-full h-full object-cover transform scale-x-[-1] opacity-90" 
+          className={`w-full h-full object-cover opacity-90 ${isMirrored ? 'transform scale-x-[-1]' : ''}`} 
         />
       )}
       <canvas ref={canvasRef} className="hidden" />
@@ -150,6 +260,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
           <span className="text-[10px] font-bold tracking-widest text-white/80">{t.live}</span>
         </div>
       )}
+
     </div>
   );
 });
