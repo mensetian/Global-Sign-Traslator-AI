@@ -73,14 +73,19 @@ const App: React.FC = () => {
              return; // Matar el ciclo aquí
         }
         
+        // Actualizamos el resultado si es válido
         if (result.traduccion !== "..." && result.traduccion.trim() !== "") {
              setTranslationResult(result);
+        } else {
+             // Si Gemini devuelve "..." (vacío), no borramos el resultado anterior inmediatamente.
         }
         setAppState(AppState.SUCCESS);
 
         const elapsed = Date.now() - startTime;
-        // Gemini 3 Pro delay
-        const minimumDelay = 3000; 
+        
+        // OPTIMIZACIÓN: Gemini 2.5 Flash es rápido. Reducimos el delay.
+        // 500ms para sensación de tiempo real.
+        const minimumDelay = 500; 
         const nextDelay = Math.max(0, minimumDelay - elapsed);
 
         setTimeout(() => {
@@ -110,7 +115,7 @@ const App: React.FC = () => {
             if (isRunningRef.current && !isPausedRef.current) {
                 processFrame();
             }
-          }, 12000); // 12 segundos de enfriamiento
+          }, 10000); // 10 segundos de enfriamiento
         } else {
           console.error("Loop error:", error);
           setTimeout(() => {
@@ -149,13 +154,14 @@ const App: React.FC = () => {
         md:landscape:relative md:landscape:flex-col md:landscape:items-center md:landscape:justify-start md:landscape:bg-gradient-to-b md:landscape:pt-6 md:landscape:space-y-4 md:landscape:pointer-events-auto
       `}>
         <h1 className="text-white/30 font-light tracking-[0.3em] text-[10px] uppercase select-none landscape:hidden md:landscape:block text-center">
-          Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Powered by Gemini 3 Pro</span>
+          Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Powered by Gemini</span>
         </h1>
 
-        {/* CONTROLES SUPERIORES: Idioma + Power Button (Integrado) */}
-        <div className="flex items-center gap-3 bg-white/5 backdrop-blur-md rounded-full p-1 border border-white/10 shadow-lg pointer-events-auto">
-          {/* Selector de Idioma */}
-          <div className="flex">
+        {/* CONTROLES SUPERIORES: Solo Idioma ahora */}
+        <div className="flex items-center gap-4 pointer-events-auto">
+          
+          {/* Selector de Idioma (Pill Shape) */}
+          <div className="flex bg-white/5 backdrop-blur-md rounded-full p-1 border border-white/10 shadow-lg">
             {LANGUAGES.map((lang) => (
               <button
                 key={lang.code}
@@ -171,25 +177,6 @@ const App: React.FC = () => {
               </button>
             ))}
           </div>
-
-          {/* Divisor vertical */}
-          <div className="w-[1px] h-4 bg-white/10"></div>
-
-          {/* Power Toggle Button (Sutil y Escondido en el menú) */}
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className={`
-              w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300
-              ${!isPaused 
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/40 hover:text-white' 
-                : 'bg-vibe-neon/10 text-vibe-neon hover:bg-vibe-neon/30 hover:text-white hover:shadow-[0_0_10px_rgba(0,243,255,0.4)]'}
-            `}
-            title={!isPaused ? t.pause : t.resume}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-              <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -205,11 +192,38 @@ const App: React.FC = () => {
             langCode={targetLanguage}
           />
 
+          {/* BOTÓN DE CONTROL SOBRE EL VIDEO (Sutil y Esquina Superior Derecha) */}
+          <div className="absolute top-4 right-4 z-50">
+            <button
+              onClick={() => setIsPaused(!isPaused)}
+              className={`
+                w-9 h-9 rounded-full flex items-center justify-center 
+                backdrop-blur-md border transition-all duration-300 shadow-lg
+                ${!isPaused 
+                  ? 'bg-red-500/20 border-red-500/30 text-red-500 hover:bg-red-500/30' 
+                  : 'bg-vibe-neon/20 border-vibe-neon/30 text-vibe-neon hover:bg-vibe-neon/30 hover:shadow-[0_0_15px_rgba(0,243,255,0.4)]'}
+              `}
+              title={!isPaused ? t.pause : t.resume}
+            >
+              {!isPaused ? (
+                // Icono de PAUSA (Sutil)
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                // Icono de PLAY (Sutil)
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 ml-0.5">
+                   <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+          </div>
+
           {/* OVERLAY DE PAUSA (Minimalista) */}
           {isPaused && (
              <div className="absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px] rounded-3xl transition-all duration-500">
                 <div className="bg-black/40 px-6 py-2 rounded-full border border-white/5">
-                  <p className="text-white/50 text-xs tracking-[0.3em] font-light">{t.paused}</p>
+                  <p className="text-white/50 text-xs tracking-[0.3em] font-light animate-pulse">{t.paused}</p>
                 </div>
              </div>
           )}

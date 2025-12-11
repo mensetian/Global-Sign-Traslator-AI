@@ -16,6 +16,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [isPermissionDenied, setIsPermissionDenied] = useState(false);
 
   const t = TRANSLATIONS[langCode as LanguageCode] || TRANSLATIONS.Spanish;
 
@@ -39,41 +40,47 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
     }
   }));
 
-  useEffect(() => {
-    const startCamera = async () => {
-      setStreamError(null);
+  const startCamera = async () => {
+    setStreamError(null);
+    setIsPermissionDenied(false);
+    try {
+      // INTENTO 1: Configuración Ideal (Cámara frontal, buena resolución)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          facingMode: 'user', 
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        },
+        audio: false
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err1) {
+      console.warn("Intento 1 de cámara falló, probando configuración básica...", err1);
       try {
-        // INTENTO 1: Configuración Ideal (Cámara frontal, buena resolución)
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: 'user', 
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          },
+        // INTENTO 2: Fallback Genérico (Cualquier cámara, resolución por defecto)
+        const streamFallback = await navigator.mediaDevices.getUserMedia({
+          video: true,
           audio: false
         });
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = streamFallback;
         }
-      } catch (err1) {
-        console.warn("Intento 1 de cámara falló, probando configuración básica...", err1);
-        try {
-          // INTENTO 2: Fallback Genérico (Cualquier cámara, resolución por defecto)
-          // Esto soluciona el error "Could not start video source" en la mayoría de casos
-          const streamFallback = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false
-          });
-          if (videoRef.current) {
-            videoRef.current.srcObject = streamFallback;
-          }
-        } catch (err2) {
-          console.error("Error fatal de cámara:", err2);
-          setStreamError("ERROR_ACCESS");
+      } catch (err2: any) {
+        console.error("Error fatal de cámara:", err2);
+        
+        // Detectar si es error de permisos
+        if (err2.name === 'NotAllowedError' || err2.name === 'PermissionDeniedError' || err2.message.includes('Permission denied')) {
+            setIsPermissionDenied(true);
         }
+        
+        setStreamError("ERROR_ACCESS");
       }
-    };
+    }
+  };
 
+  useEffect(() => {
     startCamera();
 
     return () => {
@@ -102,9 +109,23 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
       `}
     >
       {streamError ? (
-        <div className="flex flex-col items-center justify-center h-full text-red-500 font-bold p-4 text-center">
-          <p>{t.errorCamera}</p>
-          <p className="text-xs font-normal mt-2 text-gray-400">{t.checkPermissions}</p>
+        <div className="flex flex-col items-center justify-center h-full text-red-500 font-bold p-4 text-center z-10 relative">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 mb-4 opacity-50">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+          </svg>
+
+          <p className="text-lg">{t.errorCamera}</p>
+          <p className="text-xs font-normal mt-2 text-gray-400 max-w-[250px]">
+            {isPermissionDenied ? "Acceso denegado. Habilita los permisos de cámara en tu navegador." : t.checkPermissions}
+          </p>
+
+          <button 
+            onClick={startCamera}
+            className="mt-6 px-6 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-full border border-white/20 transition-all active:scale-95"
+          >
+            {t.resume || "Reintentar"}
+          </button>
         </div>
       ) : (
         <video
@@ -122,11 +143,13 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
         <div className="w-2/3 h-3/4 border-2 border-dashed border-white/40 rounded-3xl"></div>
       </div>
       
-      {/* Indicador 'LIVE' */}
-      <div className="absolute top-4 right-4 flex items-center space-x-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/5 z-20">
-        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-        <span className="text-[10px] font-bold tracking-widest text-white/80">{t.live}</span>
-      </div>
+      {/* Indicador 'LIVE' - MOVIDO A LA IZQUIERDA */}
+      {!streamError && (
+        <div className="absolute top-4 left-4 flex items-center space-x-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/5 z-20 pointer-events-none">
+          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+          <span className="text-[10px] font-bold tracking-widest text-white/80">{t.live}</span>
+        </div>
+      )}
     </div>
   );
 });

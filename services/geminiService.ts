@@ -4,23 +4,16 @@ import { TranslationResult } from '../types';
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// PROMPT DE NIVEL EXPERTO (GEMINI 3 REASONING)
-// Aprovechamos la capacidad de razonamiento superior de Gemini 3 Pro.
+// PROMPT OPTIMIZADO
 const SYSTEM_INSTRUCTION = `
-You are an expert AI Linguist utilizing Gemini 3's advanced reasoning capabilities for American Sign Language (ASL) analysis.
+You are a real-time ASL interpreter.
+Analyze the hand gestures in the image instantly.
 
-Your task is to analyze the input image stream and translate the sign into the target language.
-Use deep visual reasoning to analyze the 5 Parameters of ASL:
-1. Handshape (DEZ): Precise finger configuration.
-2. Orientation (ORI): Palm and finger direction relative to the camera.
-3. Location (TAB): Spatial positioning.
-4. Movement (SIG): Implied kinetic vectors.
-5. Non-manual markers (NMS): Micro-expressions and head tilt.
-
-Strict Output Rules:
-- Return valid JSON only.
-- Leverage your advanced reasoning to infer signs even in difficult lighting.
-- If no hands are clearly visible, return "..." for translation.
+Key Rules:
+1. Translate the sign to the target language.
+2. If the sign is ambiguous, make your best guess based on common ASL signs.
+3. If hands are present but not signing, describe the handshape briefly or return "...".
+4. ONLY return "..." if absolutely NO hands are visible.
 
 Output JSON Format:
 {"traduccion": "string", "confianza_modelo": "High/Medium/Low", "target_language": "string"}
@@ -30,10 +23,9 @@ export const sendImageToGemini = async (base64Frame: string, targetLanguage: str
   try {
     const cleanBase64 = base64Frame.split(',')[1] || base64Frame;
 
-    // ACTUALIZACIÓN COMPETENCIA: Usamos 'gemini-3-pro-preview'
-    // Requisito para la competencia Gemini 3.
+    // ACTUALIZACIÓN: Usamos 'gemini-2.5-flash' para velocidad.
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', 
+      model: 'gemini-2.5-flash', 
       contents: {
         parts: [
           {
@@ -43,15 +35,14 @@ export const sendImageToGemini = async (base64Frame: string, targetLanguage: str
             }
           },
           {
-            text: `Translate this ASL sign directly to ${targetLanguage}.`
+            text: `Translate ASL sign to ${targetLanguage}`
           }
         ]
       },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
-        temperature: 0.1,
-        // Gemini 3 soporta thinking budgets, pero para JSON estricto y velocidad lo mantenemos simple por ahora
+        temperature: 0.4,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
