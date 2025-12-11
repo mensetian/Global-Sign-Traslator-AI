@@ -11,9 +11,29 @@ let demoStartTime = 0;
 
 // Initialize Gemini Client ONLY if not in demo mode
 // This prevents crashing if API_KEY is missing when running in Demo Mode
-//const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
-const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: "" }) : null;
+// Diccionario para el modo Demo (para que los botones de idioma funcionen)
+const DEMO_SCRIPTS: Record<string, { t1: string, t2: string, t3: string, t4: string }> = {
+  'Spanish': {
+    t1: "Hola",
+    t2: "Hola. ¿Cómo estás?",
+    t3: "Quiero café",
+    t4: "Te amo"
+  },
+  'English': {
+    t1: "Hello",
+    t2: "Hello. How are you?",
+    t3: "I want coffee",
+    t4: "I love you"
+  },
+  'Portuguese': {
+    t1: "Olá",
+    t2: "Olá. Como vai?",
+    t3: "Quero café",
+    t4: "Eu te amo"
+  }
+};
 
 // PROMPT AVANZADO: GESTIÓN ESTRICTA DE CONTEXTO
 const SYSTEM_INSTRUCTION = `
@@ -56,22 +76,25 @@ export const sendImageToGemini = async (
     if (demoStartTime === 0) demoStartTime = Date.now();
     const elapsed = Date.now() - demoStartTime;
     let demoText = "";
+    
+    // Seleccionar script basado en idioma
+    const script = DEMO_SCRIPTS[targetLanguage] || DEMO_SCRIPTS['Spanish'];
 
     // Secuencia Demo (28 segundos en total)
     // 0-3s: Esperando/Calibrando
     if (elapsed < 3000) demoText = "..."; 
     
     // 3-7s: Saludo inicial
-    else if (elapsed < 7000) demoText = "Hola";
+    else if (elapsed < 7000) demoText = script.t1;
     
     // 7-14s: Conversación fluida (Acumula sobre el anterior)
-    else if (elapsed < 14000) demoText = "Hola. ¿Cómo estás?"; 
+    else if (elapsed < 14000) demoText = script.t2; 
     
-    // 14-21s: Cambio de tema (NO ACUMULA - Frase nueva)
-    else if (elapsed < 21000) demoText = "Quiero café";
+    // 14-21s: Cambio de tema (NO ACUMULA - Frase nueva, limpia pantalla)
+    else if (elapsed < 21000) demoText = script.t3;
     
-    // 21-28s: Frase final (NO ACUMULA - Frase nueva)
-    else if (elapsed < 28000) demoText = "Te amo"; 
+    // 21-28s: Frase final (NO ACUMULA - Frase nueva, limpia pantalla)
+    else if (elapsed < 28000) demoText = script.t4; 
     
     // >28s: Reiniciar loop
     else { demoStartTime = Date.now(); demoText = "..."; }
