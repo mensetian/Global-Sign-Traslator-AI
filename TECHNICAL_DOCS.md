@@ -6,7 +6,7 @@ Este documento describe la arquitectura técnica, el flujo de datos y las decisi
 
 ## 1. Arquitectura General
 
-La aplicación es una Single Page Application (SPA) construida con **React 19** y **TypeScript**. No utiliza un backend tradicional; toda la lógica de procesamiento reside en el cliente (navegador), comunicándose directamente con la API de **Google Gemini 1.5/2.5 Flash**.
+La aplicación es una Single Page Application (SPA) construida con **React 19** y **TypeScript**. No utiliza un backend tradicional; toda la lógica de procesamiento reside en el cliente (navegador), comunicándose directamente con la API de **Google Gemini 2.5 Flash**.
 
 ### Componentes Principales
 

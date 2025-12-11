@@ -1,6 +1,6 @@
 {
-  "name": "Global Sign Translator (Gemini 3 Edition)",
-  "description": "Next-gen accessible communication tool powered by Google Gemini 3 Pro multimodal vision. Translates ASL to multiple languages in real-time with phonological parameter analysis.",
+  "name": "Global Sign Translator (Gemini Edition)",
+  "description": "Next-gen accessible communication tool powered by Google Gemini 2.5 Flash multimodal vision. Translates ASL to multiple languages in real-time with phonological parameter analysis.",
   "requestFramePermissions": [
     "camera"
   ]

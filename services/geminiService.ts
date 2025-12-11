@@ -113,19 +113,19 @@ ACTION: Analyze frames. Decide to HOLD (return context), MERGE (add word), or SP
     });
 
     const text = response.text;
-    if (!text) throw new Error("No response");
-
-    return JSON.parse(text) as TranslationResult;
-
-  } catch (error: any) {
-    const errString = error.toString().toLowerCase();
-    if (errString.includes('429') || errString.includes('quota')) {
-      throw error; 
+    if (!text) {
+       throw new Error("Respuesta vacía de Gemini");
     }
 
-    console.warn("Gemini Analysis non-critical error:", error);
+    // Limpieza básica por si el modelo devuelve markdown
+    const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanedText) as TranslationResult;
+
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    // Fallback silencioso para no romper la UI
     return {
-      traduccion: previousContext || "...",
+      traduccion: "...",
       confianza_modelo: "Low",
       target_language: targetLanguage
     };
