@@ -27,13 +27,16 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
       if (video && canvas) {
         const context = canvas.getContext('2d');
         if (context && video.videoWidth > 0) {
-          // OPTIMIZACIÓN: Reducir resolución para envío rápido
-          const scaleFactor = 480 / video.videoWidth;
-          canvas.width = 480;
+          // OPTIMIZACIÓN AGRESIVA PARA RÁFAGA (BURST MODE)
+          // Bajamos a 320px de ancho. Suficiente para detectar manos, 
+          // pero hace que el payload de 3 imágenes sea ligero.
+          const scaleFactor = 320 / video.videoWidth;
+          canvas.width = 320;
           canvas.height = video.videoHeight * scaleFactor;
           
           context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          return canvas.toDataURL('image/jpeg', 0.6); // Compresión 0.6 para velocidad móvil
+          // Calidad 0.5: Balance perfecto entre velocidad de subida y nitidez
+          return canvas.toDataURL('image/jpeg', 0.5); 
         }
       }
       return null;
@@ -44,12 +47,12 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
     setStreamError(null);
     setIsPermissionDenied(false);
     try {
-      // INTENTO 1: Configuración Ideal (Cámara frontal, buena resolución)
+      // INTENTO 1: Configuración Ideal (Cámara frontal, frameRate alto)
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: 'user', 
-          width: { ideal: 640 },
-          height: { ideal: 480 }
+          width: { ideal: 640 }, // Capturamos a 640 pero reducimos en canvas
+          frameRate: { ideal: 30 } // Importante para capturar movimiento fluido
         },
         audio: false
       });
@@ -59,7 +62,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
     } catch (err1) {
       console.warn("Intento 1 de cámara falló, probando configuración básica...", err1);
       try {
-        // INTENTO 2: Fallback Genérico (Cualquier cámara, resolución por defecto)
+        // INTENTO 2: Fallback Genérico
         const streamFallback = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false
@@ -98,11 +101,8 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
         relative w-full overflow-hidden bg-black shadow-2xl transition-all duration-300
         
         /* DISEÑO RESPONSIVO DE ASPECTO: */
-        /* Móvil Vertical: 3:4 (Portrait) */
         aspect-[3/4] 
-        /* Móvil Horizontal: 16:9 (Landscape) - Llenar pantalla ancha */
         landscape:aspect-video landscape:rounded-none
-        /* Desktop (MD+): Siempre 16:9 y redondeado */
         md:aspect-video md:rounded-3xl
         
         ${isFlashing ? 'border-vibe-neon/50' : 'border-white/10 border'} 
@@ -143,7 +143,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
         <div className="w-2/3 h-3/4 border-2 border-dashed border-white/40 rounded-3xl"></div>
       </div>
       
-      {/* Indicador 'LIVE' - MOVIDO A LA IZQUIERDA */}
+      {/* Indicador 'LIVE' */}
       {!streamError && (
         <div className="absolute top-4 left-4 flex items-center space-x-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/5 z-20 pointer-events-none">
           <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>

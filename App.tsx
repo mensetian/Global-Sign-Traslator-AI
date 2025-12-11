@@ -18,28 +18,31 @@ const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [isRateLimited, setIsRateLimited] = useState(false);
   
-  // INICIO SEGURO: Empezamos en PAUSA para no gastar cuota al cargar la página.
+  // INICIO SEGURO: Empezamos en PAUSA
   const [isPaused, setIsPaused] = useState(true); 
   
-  // REF CRÍTICA: Mantiene el estado de pausa actualizado dentro de los timeouts asíncronos
   const isPausedRef = useRef(isPaused);
-  
   const cameraRef = useRef<CameraFeedHandle>(null);
   const isRunningRef = useRef(true);
   const languageRef = useRef(targetLanguage);
+  
+  const lastTextRef = useRef("");
 
-  // Get current translation object
   const t = TRANSLATIONS[targetLanguage as LanguageCode] || TRANSLATIONS.Spanish;
 
-  // Sincronizar refs
   useEffect(() => {
     languageRef.current = targetLanguage;
   }, [targetLanguage]);
+  
+  useEffect(() => {
+    if (isPaused) {
+       // Opcional: Podríamos limpiar el contexto aquí si quisiéramos empezar de cero
+    }
+  }, [isPaused]);
 
   useEffect(() => {
     isPausedRef.current = isPaused;
     
-    // Si quitamos la pausa, iniciamos el ciclo inmediatamente
     if (!isPaused) {
       setAppState(AppState.ANALYZING);
       processFrame();
@@ -49,73 +52,86 @@ const App: React.FC = () => {
     }
   }, [isPaused]);
 
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   const processFrame = useCallback(async () => {
-    // CHEQUEO DE SEGURIDAD 1: Si la app se desmontó o está pausada (vía Ref), abortar.
     if (!isRunningRef.current || isPausedRef.current) return;
-    
-    // Si estamos limitados por la API, no hacemos nada (el timeout de reintento lo manejará)
     if (isRateLimited) return;
 
-    const imageSrc = cameraRef.current?.captureFrame();
+    // --- LÓGICA DE RÁFAGA (BURST CAPTURE) ---
+    const frames: string[] = [];
+    
+    // Frame 1 (T=0ms)
+    const f1 = cameraRef.current?.captureFrame();
+    if (f1) frames.push(f1);
+    
+    // OPTIMIZACIÓN DE TIEMPO: 
+    // Reducido de 120ms a 80ms.
+    // 80ms es suficiente para detectar "delta" de movimiento (aprox 2.5 frames a 30fps),
+    // pero reduce la latencia total de captura de 240ms a 160ms, haciendo la app más ágil.
+    await wait(80);
+    
+    // Frame 2 (T=80ms)
+    const f2 = cameraRef.current?.captureFrame();
+    if (f2) frames.push(f2);
+    
+    await wait(80);
+    
+    // Frame 3 (T=160ms)
+    const f3 = cameraRef.current?.captureFrame();
+    if (f3) frames.push(f3);
 
-    if (imageSrc) {
+    if (frames.length > 0) {
       setIsActive(true); 
       setAppState(AppState.ANALYZING);
       const startTime = Date.now();
 
       try {
-        const result = await sendImageToGemini(imageSrc, languageRef.current);
+        // LIMPIEZA DE CONTEXTO:
+        // Si el texto es muy largo, cortamos para no confundir al modelo con historia antigua.
+        // Mantenemos los últimos 150 caracteres aprox.
+        let safeContext = lastTextRef.current;
+        if (safeContext.length > 150) {
+            safeContext = "..." + safeContext.slice(-150);
+        }
         
-        // CHEQUEO DE SEGURIDAD 2: El usuario pudo haber pausado MIENTRAS esperábamos a Gemini
+        const result = await sendImageToGemini(frames, languageRef.current, safeContext);
+        
         if (isPausedRef.current) {
              setIsActive(false);
              setAppState(AppState.IDLE);
-             return; // Matar el ciclo aquí
+             return; 
         }
         
-        // Actualizamos el resultado si es válido
-        if (result.traduccion !== "..." && result.traduccion.trim() !== "") {
+        // Solo actualizamos si hay contenido real y no es solo puntuación
+        if (result.traduccion && result.traduccion !== "..." && result.traduccion.trim().length > 0) {
              setTranslationResult(result);
-        } else {
-             // Si Gemini devuelve "..." (vacío), no borramos el resultado anterior inmediatamente.
+             lastTextRef.current = result.traduccion; 
         }
         setAppState(AppState.SUCCESS);
 
         const elapsed = Date.now() - startTime;
-        
-        // OPTIMIZACIÓN: Gemini 2.5 Flash es rápido. Reducimos el delay.
-        // 500ms para sensación de tiempo real.
-        const minimumDelay = 500; 
+        const minimumDelay = 200; 
         const nextDelay = Math.max(0, minimumDelay - elapsed);
 
         setTimeout(() => {
-            // CHEQUEO DE SEGURIDAD 3: Verificar Ref antes de reiniciar
             if (isRunningRef.current && !isPausedRef.current) processFrame();
         }, nextDelay);
 
       } catch (error: any) {
-        // Detección robusta de errores de cuota (429)
         const errString = error?.toString()?.toLowerCase() || '';
-        const isQuotaError = 
-          errString.includes('429') || 
-          errString.includes('quota') || 
-          errString.includes('resource_exhausted') ||
-          error?.status === 429 ||
-          error?.error?.code === 429 ||
-          error?.response?.status === 429;
+        const isQuotaError = errString.includes('429') || errString.includes('quota');
 
         if (isQuotaError) {
           console.warn("Cuota de API excedida (429).");
           setIsRateLimited(true);
           
-          // Lógica de reintento con verificación de PAUSA
           setTimeout(() => {
             setIsRateLimited(false);
-            // Solo reintentamos si el usuario NO ha pausado durante el tiempo de espera
             if (isRunningRef.current && !isPausedRef.current) {
                 processFrame();
             }
-          }, 10000); // 10 segundos de enfriamiento
+          }, 10000); 
         } else {
           console.error("Loop error:", error);
           setTimeout(() => {
@@ -128,14 +144,12 @@ const App: React.FC = () => {
         }
       }
     } else {
-      // Si la cámara no está lista, reintentar rápido
       setTimeout(() => {
           if (isRunningRef.current && !isPausedRef.current) processFrame();
       }, 500);
     }
-  }, [isRateLimited]); // Dependencias mínimas, usamos Refs para lo demás
+  }, [isRateLimited]);
 
-  // Cleanup al desmontar
   useEffect(() => {
     isRunningRef.current = true;
     return () => {
@@ -157,15 +171,16 @@ const App: React.FC = () => {
           Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Powered by Gemini</span>
         </h1>
 
-        {/* CONTROLES SUPERIORES: Solo Idioma ahora */}
         <div className="flex items-center gap-4 pointer-events-auto">
-          
-          {/* Selector de Idioma (Pill Shape) */}
           <div className="flex bg-white/5 backdrop-blur-md rounded-full p-1 border border-white/10 shadow-lg">
             {LANGUAGES.map((lang) => (
               <button
                 key={lang.code}
-                onClick={() => setTargetLanguage(lang.code)}
+                onClick={() => {
+                  setTargetLanguage(lang.code);
+                  lastTextRef.current = ""; 
+                  setTranslationResult(null);
+                }}
                 className={`
                   px-3 py-2 rounded-full text-[10px] font-bold tracking-wider transition-all duration-300
                   ${targetLanguage === lang.code 
@@ -192,10 +207,12 @@ const App: React.FC = () => {
             langCode={targetLanguage}
           />
 
-          {/* BOTÓN DE CONTROL SOBRE EL VIDEO (Sutil y Esquina Superior Derecha) */}
           <div className="absolute top-4 right-4 z-50">
             <button
-              onClick={() => setIsPaused(!isPaused)}
+              onClick={() => {
+                const newPausedState = !isPaused;
+                setIsPaused(newPausedState);
+              }}
               className={`
                 w-9 h-9 rounded-full flex items-center justify-center 
                 backdrop-blur-md border transition-all duration-300 shadow-lg
@@ -206,12 +223,10 @@ const App: React.FC = () => {
               title={!isPaused ? t.pause : t.resume}
             >
               {!isPaused ? (
-                // Icono de PAUSA (Sutil)
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                   <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clipRule="evenodd" />
                 </svg>
               ) : (
-                // Icono de PLAY (Sutil)
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 ml-0.5">
                    <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
                 </svg>
@@ -219,7 +234,6 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* OVERLAY DE PAUSA (Minimalista) */}
           {isPaused && (
              <div className="absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px] rounded-3xl transition-all duration-500">
                 <div className="bg-black/40 px-6 py-2 rounded-full border border-white/5">
@@ -228,7 +242,6 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {/* Alerta API 'Sutil' */}
           {isRateLimited && !isPaused && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-yellow-500/30 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
