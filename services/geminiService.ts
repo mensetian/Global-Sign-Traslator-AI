@@ -11,7 +11,9 @@ let demoStartTime = 0;
 
 // Initialize Gemini Client ONLY if not in demo mode
 // This prevents crashing if API_KEY is missing when running in Demo Mode
-const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+//const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+
+const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: "" }) : null;
 
 // PROMPT AVANZADO: GESTIÓN ESTRICTA DE CONTEXTO
 const SYSTEM_INSTRUCTION = `
