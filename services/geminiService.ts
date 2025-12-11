@@ -1,6 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TranslationResult } from '../types';
 
+// ==========================================
+// CONFIGURACIÓN DE MODO DEMO (PROMO VIDEO)
+// ==========================================
+const IS_DEMO_MODE = false; // Set to FALSE for production
+
+// Variable para controlar la secuencia de tiempo del demo
+let demoStartTime = 0;
+
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -20,6 +28,52 @@ Output JSON Format:
 `;
 
 export const sendImageToGemini = async (base64Frame: string, targetLanguage: string): Promise<TranslationResult> => {
+  // ---------------------------------------------------------
+  // LÓGICA DE MODO DEMO (SECUENCIAL CINEMATOGRÁFICA - EXTENDED)
+  // ---------------------------------------------------------
+  if (IS_DEMO_MODE) {
+    console.log("🚀 DEMO MODE ACTIVE: Simulating API Processing...");
+    
+    // Iniciar temporizador si es la primera llamada
+    if (demoStartTime === 0) {
+      demoStartTime = Date.now();
+    }
+
+    const elapsed = Date.now() - demoStartTime;
+    let demoText = "";
+
+    // LÓGICA DE SECUENCIA TEMPORAL (Ciclo de 22 segundos)
+    if (elapsed < 3000) {
+      // 0s a 3s: ESPERA INICIAL (3 segundos para encuadrar)
+      demoText = "..."; 
+    } else if (elapsed < 8000) {
+      // 3s a 8s: PRIMER GESTO (Duración 5s)
+      demoText = "Hola";
+    } else if (elapsed < 15000) {
+      // 8s a 15s: SEGUNDO GESTO (Duración 7s - Más tiempo aquí)
+      demoText = "¿Cómo estás?";
+    } else if (elapsed < 22000) {
+      // 15s a 22s: TERCER GESTO (Duración 7s - Más tiempo aquí)
+      demoText = "Quiero un café";
+    } else {
+      // Reiniciar ciclo automáticamente
+      demoStartTime = Date.now();
+      demoText = "..."; 
+    }
+    
+    // Simular delay de procesamiento (800ms para realismo fluido)
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    return {
+      traduccion: demoText,
+      confianza_modelo: demoText === "..." ? "Low" : "High",
+      target_language: targetLanguage
+    };
+  }
+
+  // ---------------------------------------------------------
+  // LÓGICA DE PRODUCCIÓN (LLAMADA REAL)
+  // ---------------------------------------------------------
   try {
     const cleanBase64 = base64Frame.split(',')[1] || base64Frame;
 
