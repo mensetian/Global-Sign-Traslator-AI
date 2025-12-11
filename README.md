@@ -23,12 +23,20 @@ Unlike traditional classifiers that only recognize static images (A, B, C...), t
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Stack & Model Selection
 
 *   **Frontend:** React 19, TypeScript
 *   **Styling:** Tailwind CSS (Neon/Cyberpunk aesthetic)
 *   **AI Model:** Google Gemini 2.5 Flash (via `@google/genai` SDK)
 *   **Hardware Access:** Native WebRTC (`navigator.mediaDevices`)
+
+### 🧠 Why Gemini 2.5 Flash and not Gemini 3.0 Pro?
+
+We deliberately chose **`gemini-2.5-flash`** over the newer **`gemini-3-pro-preview`** for this specific use case. Here is the engineering reasoning:
+
+1.  **Latency is King:** For a real-time translator, the user experience depends on immediate feedback. The "Flash" model family is architected for **high throughput and low latency**. The "Pro" models, while having superior reasoning capabilities for complex tasks (like advanced math or coding), introduce a processing delay that breaks the natural flow of conversation.
+2.  **Visual Recognition Speed:** 2.5 Flash is exceptionally fast at processing multimodal inputs (video frames). We need the AI to identify a visual pattern in milliseconds, not deeply analyze the philosophical meaning of the image.
+3.  **Efficiency:** Sending a 3-frame burst every few seconds requires a lightweight, responsive model. Using a Pro model would be overkill for visual recognition and would result in a sluggish UI (waiting 2-3 seconds per sign vs sub-second responses).
 
 ---
 
