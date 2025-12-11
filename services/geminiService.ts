@@ -54,13 +54,23 @@ export const sendImageToGemini = async (
     const elapsed = Date.now() - demoStartTime;
     let demoText = "";
 
-    // Secuencia ajustada: No acumula todo, simula cambio de tema.
+    // Secuencia Demo (28 segundos en total)
+    // 0-3s: Esperando/Calibrando
     if (elapsed < 3000) demoText = "..."; 
-    else if (elapsed < 8000) demoText = "Hola";
-    else if (elapsed < 15000) demoText = "Hola. ¿Cómo estás?"; 
-    // Aquí simulamos que se "limpia" el contexto anterior para una nueva idea
-    else if (elapsed < 22000) demoText = "Quiero café";
-    else if (elapsed < 30000) demoText = "Te amo"; 
+    
+    // 3-7s: Saludo inicial
+    else if (elapsed < 7000) demoText = "Hola";
+    
+    // 7-14s: Conversación fluida (Acumula sobre el anterior)
+    else if (elapsed < 14000) demoText = "Hola. ¿Cómo estás?"; 
+    
+    // 14-21s: Cambio de tema (NO ACUMULA - Frase nueva)
+    else if (elapsed < 21000) demoText = "Quiero café";
+    
+    // 21-28s: Frase final (NO ACUMULA - Frase nueva)
+    else if (elapsed < 28000) demoText = "Te amo"; 
+    
+    // >28s: Reiniciar loop
     else { demoStartTime = Date.now(); demoText = "..."; }
     
     await new Promise(resolve => setTimeout(resolve, 800));
