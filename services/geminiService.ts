@@ -2,66 +2,35 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { TranslationResult } from '../types';
 
 // ==========================================
-// CONFIGURACIÓN DE MODO DEMO (PROMO VIDEO)
+// CONFIGURACIÓN DE MODO DEMO
 // ==========================================
-const IS_DEMO_MODE = true; // Set to FALSE for production
+const IS_DEMO_MODE = false; 
 
-// Variable para controlar la secuencia de tiempo del demo
 let demoStartTime = 0;
-
-// Initialize Gemini Client ONLY if not in demo mode
-// This prevents crashing if API_KEY is missing when running in Demo Mode
 const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
-// Diccionario para el modo Demo (para que los botones de idioma funcionen)
 const DEMO_SCRIPTS: Record<string, { t1: string, t2: string, t3: string, t4: string }> = {
-  'Spanish': {
-    t1: "Hola",
-    t2: "Hola. ¿Cómo estás?",
-    t3: "Quiero café",
-    t4: "Te amo"
-  },
-  'English': {
-    t1: "Hello",
-    t2: "Hello. How are you?",
-    t3: "I want coffee",
-    t4: "I love you"
-  },
-  'Portuguese': {
-    t1: "Olá",
-    t2: "Olá. Como vai?",
-    t3: "Quero café",
-    t4: "Eu te amo"
-  }
+  'Spanish': { t1: "Hola", t2: "Hola. ¿Cómo estás?", t3: "Quiero café", t4: "Te amo" },
+  'English': { t1: "Hello", t2: "Hello. How are you?", t3: "I want coffee", t4: "I love you" },
+  'Portuguese': { t1: "Olá", t2: "Olá. Como vai?", t3: "Quero café", t4: "Eu te amo" }
 };
 
-// PROMPT AVANZADO: GESTIÓN ESTRICTA DE CONTEXTO
+// PROMPT SIMPLIFICADO Y ROBUSTO
 const SYSTEM_INSTRUCTION = `
-You are a professional ASL interpreter analyzing a BURST SEQUENCE (3 frames).
+You are an expert Sign Language Translator.
+Task: Analyze the sequence of 3 images (video burst) and identify the ASL sign being performed.
 
-INPUTS:
-1. IMAGES: A short video sequence (3 frames ~400ms). Detect motion vs static hold.
-2. PREVIOUS CONTEXT: The text currently displayed on screen.
+Context:
+- The user is performing a sign.
+- "Previous Context" is the text already translated.
 
-YOUR GOAL: Output the UPDATED text string.
+Instructions:
+1. Identify the sign clearly (e.g., "Hello", "Thank you", "Family").
+2. Return ONLY the translation of the current gesture.
+3. If the user is holding the SAME sign as the previous context, repeat the word.
+4. If no clear sign is detected (hands down, blurry, nothing), return "...".
 
-RULES FOR CONTEXT MANAGEMENT (CRITICAL):
-1. **APPEND vs. MERGE**: 
-   - If the new sign grammatically flows from the Context (e.g., Context="I", Sign="Want" -> Result="I want"), merge them.
-   - If the new sign is a NEW idea (e.g., Context="Hello", Sign="Coffee" -> Result="Hello. Coffee"), use PUNCTUATION to separate.
-   
-2. **NO HALLUCINATIONS**: 
-   - Do NOT add words that were not signed (like "please", "am", "the") unless absolutely required for basic grammar. 
-   - Do NOT re-interpret the "Previous Context" if the new sign is unrelated. Keep the old text as is and append the new one.
-
-3. **HOLDING SIGNS**: 
-   - If the gesture in the frames is IDENTICAL to the gesture that created the "Previous Context" (user is just holding the hand up), return the "Previous Context" UNCHANGED. Do not repeat the word.
-
-4. **CORRECTIONS**:
-   - If the user shakes their head or waves hand dismissively, clear the last word.
-
-Output JSON Format:
-{"traduccion": "string (The FULL updated sentence)", "confianza_modelo": "High/Medium/Low", "target_language": "string"}
+Return JSON.
 `;
 
 export const sendImageToGemini = async (
@@ -69,70 +38,54 @@ export const sendImageToGemini = async (
   targetLanguage: string,
   previousContext: string = ""
 ): Promise<TranslationResult> => {
-  // ---------------------------------------------------------
-  // LÓGICA DE MODO DEMO
-  // ---------------------------------------------------------
+  // --- MODO DEMO ---
   if (IS_DEMO_MODE) {
     if (demoStartTime === 0) demoStartTime = Date.now();
     const elapsed = Date.now() - demoStartTime;
-    let demoText = "";
-    
-    // Seleccionar script basado en idioma
+    let demoText = "...";
     const script = DEMO_SCRIPTS[targetLanguage] || DEMO_SCRIPTS['Spanish'];
 
-    // Secuencia Demo (28 segundos en total)
-    // 0-3s: Esperando/Calibrando
     if (elapsed < 3000) demoText = "..."; 
-    
-    // 3-7s: Saludo inicial
     else if (elapsed < 7000) demoText = script.t1;
-    
-    // 7-14s: Conversación fluida (Acumula sobre el anterior)
     else if (elapsed < 14000) demoText = script.t2; 
-    
-    // 14-21s: Cambio de tema (NO ACUMULA - Frase nueva, limpia pantalla)
     else if (elapsed < 21000) demoText = script.t3;
-    
-    // 21-28s: Frase final (NO ACUMULA - Frase nueva, limpia pantalla)
     else if (elapsed < 28000) demoText = script.t4; 
-    
-    // >28s: Reiniciar loop
     else { demoStartTime = Date.now(); demoText = "..."; }
     
     await new Promise(resolve => setTimeout(resolve, 800));
-
-    return {
-      traduccion: demoText,
-      confianza_modelo: demoText === "..." ? "Low" : "High",
-      target_language: targetLanguage
-    };
+    return { translation: demoText, confidence: demoText === "..." ? "Low" : "High" } as any;
   }
 
-  // ---------------------------------------------------------
-  // LÓGICA DE PRODUCCIÓN
-  // ---------------------------------------------------------
+  // --- MODO PRODUCCIÓN ---
   try {
-    if (!ai) {
-        throw new Error("Gemini Client not initialized. Check IS_DEMO_MODE or API_KEY.");
-    }
+    if (!ai) throw new Error("Gemini Client not initialized.");
 
     const framesArray = Array.isArray(frames) ? frames : [frames];
     const contentsParts: any[] = [];
 
+    // Validar frames
+    let validFrames = 0;
     framesArray.forEach(frame => {
-      const cleanBase64 = frame.split(',')[1] || frame;
-      contentsParts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: cleanBase64
-        }
-      });
+      if (frame && frame.length > 100) { // Simple check de longitud base64
+        const cleanBase64 = frame.split(',')[1] || frame;
+        contentsParts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: cleanBase64
+          }
+        });
+        validFrames++;
+      }
     });
+
+    if (validFrames === 0) {
+        throw new Error("No valid frames to send");
+    }
 
     contentsParts.push({
       text: `Target Language: ${targetLanguage}.
-Current Displayed Text (Context): "${previousContext}".
-ACTION: Analyze frames. Decide to HOLD (return context), MERGE (add word), or SPLIT (add punctuation + word).`
+Previous Context: "${previousContext}".
+Identify the sign.`
     });
 
     const response = await ai.models.generateContent({
@@ -141,7 +94,7 @@ ACTION: Analyze frames. Decide to HOLD (return context), MERGE (add word), or SP
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
-        temperature: 0.1, // BAJAMOS TEMPERATURA: Queremos precisión, no creatividad.
+        temperature: 0.4, // Un poco más de creatividad ayuda a inferir gestos no perfectos
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -155,17 +108,20 @@ ACTION: Analyze frames. Decide to HOLD (return context), MERGE (add word), or SP
     });
 
     const text = response.text;
-    if (!text) {
-       throw new Error("Respuesta vacía de Gemini");
-    }
+    if (!text) throw new Error("Empty response from Gemini");
 
-    // Limpieza básica por si el modelo devuelve markdown
     const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(cleanedText) as TranslationResult;
 
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    // Fallback silencioso para no romper la UI
+  } catch (error: any) {
+    // CRITICAL FIX: Check if it's a quota error before suppressing it
+    const errorMsg = error?.message || error?.toString() || JSON.stringify(error);
+    if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota")) {
+      console.warn("Quota exceeded in Service, rethrowing...");
+      throw error; // Let App.tsx handle the backoff
+    }
+    
+    console.error("Gemini Error (Recoverable):", error);
     return {
       traduccion: "...",
       confianza_modelo: "Low",

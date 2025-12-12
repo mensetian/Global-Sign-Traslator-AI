@@ -36,7 +36,7 @@ const App: React.FC = () => {
   
   useEffect(() => {
     if (isPaused) {
-       // Opcional: Podríamos limpiar el contexto aquí si quisiéramos empezar de cero
+       // Paused logic if needed
     }
   }, [isPaused]);
 
@@ -45,7 +45,11 @@ const App: React.FC = () => {
     
     if (!isPaused) {
       setAppState(AppState.ANALYZING);
-      processFrame();
+      // Give camera time to warm up (1.5s)
+      const timer = setTimeout(() => {
+         if (isRunningRef.current && !isPausedRef.current) processFrame();
+      }, 1500);
+      return () => clearTimeout(timer);
     } else {
       setAppState(AppState.IDLE);
       setIsActive(false);
@@ -58,17 +62,29 @@ const App: React.FC = () => {
     if (!isRunningRef.current || isPausedRef.current) return;
     if (isRateLimited) return;
 
-    // --- LÓGICA DE RÁFAGA (BURST CAPTURE) ---
+    // --- 1. Detección Local de Manos (Cliente) ---
+    // Si no hay manos, no gastamos cuota de API.
+    const hasHands = cameraRef.current?.isHandDetected;
+
+    if (!hasHands) {
+        // UI Feedback: Cambiar a modo búsqueda si estábamos activos
+        if (appState !== AppState.IDLE) setAppState(AppState.IDLE);
+        
+        // Volver a revisar muy rápido (100ms) para sentir que es "Tiempo Real"
+        setTimeout(() => {
+            if (isRunningRef.current && !isPausedRef.current) processFrame();
+        }, 100);
+        return;
+    }
+
+    // --- 2. Captura en Ráfaga (Burst Capture) ---
+    // Solo llegamos aquí si hay manos detectadas
     const frames: string[] = [];
     
     // Frame 1 (T=0ms)
     const f1 = cameraRef.current?.captureFrame();
     if (f1) frames.push(f1);
     
-    // OPTIMIZACIÓN DE TIEMPO: 
-    // Reducido de 120ms a 80ms.
-    // 80ms es suficiente para detectar "delta" de movimiento (aprox 2.5 frames a 30fps),
-    // pero reduce la latencia total de captura de 240ms a 160ms, haciendo la app más ágil.
     await wait(80);
     
     // Frame 2 (T=80ms)
@@ -81,18 +97,20 @@ const App: React.FC = () => {
     const f3 = cameraRef.current?.captureFrame();
     if (f3) frames.push(f3);
 
-    if (frames.length > 0) {
+    // Solo procesamos si tenemos al menos 2 frames válidos para detectar movimiento
+    if (frames.length >= 1) {
       setIsActive(true); 
       setAppState(AppState.ANALYZING);
       const startTime = Date.now();
 
       try {
-        // LIMPIEZA DE CONTEXTO:
-        // Si el texto es muy largo, cortamos para no confundir al modelo con historia antigua.
-        // Mantenemos los últimos 150 caracteres aprox.
+        // --- GESTIÓN INTELIGENTE DE CONTEXTO ---
         let safeContext = lastTextRef.current;
-        if (safeContext.length > 150) {
-            safeContext = "..." + safeContext.slice(-150);
+        const sentences = safeContext.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [];
+        if (sentences.length > 1) {
+            safeContext = sentences[sentences.length - 1].trim();
+        } else if (safeContext.length > 100) {
+            safeContext = "..." + safeContext.slice(-100);
         }
         
         const result = await sendImageToGemini(frames, languageRef.current, safeContext);
@@ -103,7 +121,7 @@ const App: React.FC = () => {
              return; 
         }
         
-        // Solo actualizamos si hay contenido real y no es solo puntuación
+        // Actualizar UI
         if (result.traduccion && result.traduccion !== "..." && result.traduccion.trim().length > 0) {
              setTranslationResult(result);
              lastTextRef.current = result.traduccion; 
@@ -111,7 +129,9 @@ const App: React.FC = () => {
         setAppState(AppState.SUCCESS);
 
         const elapsed = Date.now() - startTime;
-        const minimumDelay = 200; 
+        // Si detectamos manos y procesamos con éxito, esperamos un poco más para respetar Rate Limits.
+        // Como solo llamamos cuando hay manos, podemos permitirnos ser un poco más agresivos (2s)
+        const minimumDelay = 2500; 
         const nextDelay = Math.max(0, minimumDelay - elapsed);
 
         setTimeout(() => {
@@ -119,24 +139,22 @@ const App: React.FC = () => {
         }, nextDelay);
 
       } catch (error: any) {
-        const errString = error?.toString()?.toLowerCase() || '';
-        const isQuotaError = errString.includes('429') || errString.includes('quota');
+        const errString = error?.message || error?.toString() || JSON.stringify(error) || '';
+        const isQuotaError = errString.includes('429') || errString.includes('quota') || errString.includes('RESOURCE_EXHAUSTED');
 
         if (isQuotaError) {
-          console.warn("Cuota de API excedida (429).");
+          console.warn("Loop error (Quota): Rate Limit hit. Pausing for 10s...");
           setIsRateLimited(true);
-          
           setTimeout(() => {
             setIsRateLimited(false);
-            if (isRunningRef.current && !isPausedRef.current) {
-                processFrame();
-            }
+            if (isRunningRef.current && !isPausedRef.current) processFrame();
           }, 10000); 
         } else {
           console.error("Loop error:", error);
+          // Error genérico, esperar 2s y reintentar
           setTimeout(() => {
               if (isRunningRef.current && !isPausedRef.current) processFrame();
-          }, 1000);
+          }, 2000);
         }
       } finally {
         if (!isPausedRef.current) {
@@ -144,11 +162,12 @@ const App: React.FC = () => {
         }
       }
     } else {
+      // Si la cámara no está lista (frames vacíos), esperar antes de reintentar
       setTimeout(() => {
           if (isRunningRef.current && !isPausedRef.current) processFrame();
-      }, 500);
+      }, 1000);
     }
-  }, [isRateLimited]);
+  }, [isRateLimited, appState]);
 
   useEffect(() => {
     isRunningRef.current = true;
@@ -195,14 +214,10 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* MAIN CONTENT 
-          CAMBIO: Aumentado max-w-4xl a max-w-7xl en pantallas grandes para ampliar la vista de escritorio 
-      */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 w-full md:max-w-6xl lg:max-w-7xl flex flex-col justify-center items-center relative px-0 md:px-4">
         
-        {/* Camera Container 
-            CAMBIO: Eliminado md:max-w-3xl. Añadido md:max-h-[80vh] para controlar altura en escritorio.
-        */}
+        {/* Camera Container */}
         <div className="relative w-full flex flex-col items-center group landscape:h-full md:landscape:h-auto md:landscape:max-h-[75vh] lg:landscape:max-h-[80vh]">
           
           <CameraFeed 
@@ -213,7 +228,6 @@ const App: React.FC = () => {
           />
 
           <div className="absolute top-4 right-4 z-50 flex gap-3">
-            {/* Flip Camera Button */}
             <button
                 onClick={() => cameraRef.current?.toggleCamera()}
                 className="w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 bg-black/40 text-white/80 hover:bg-white/10 hover:text-white transition-all duration-300 shadow-lg active:scale-90"
@@ -224,7 +238,6 @@ const App: React.FC = () => {
                 </svg>
             </button>
 
-            {/* Play/Pause Button */}
             <button
               onClick={() => {
                 const newPausedState = !isPaused;
@@ -272,7 +285,7 @@ const App: React.FC = () => {
 
         </div>
 
-        {/* RESULTADOS - FIXED FOR PC VISIBILITY */}
+        {/* RESULTADOS */}
         <div className={`
             absolute bottom-6 left-0 right-0 z-50 px-4 w-full flex justify-center pointer-events-none
             md:bottom-12
