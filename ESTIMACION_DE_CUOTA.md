@@ -1,67 +1,67 @@
-# Estimación de Cuota y Costos: Global Sign Translator (Flash Edition)
+# Quota & Cost Estimation: Global Sign Translator (Flash Edition)
 
-Este documento detalla el consumo de recursos utilizando el modelo **`gemini-2.5-flash`** con la arquitectura de "Flujo Continuo" optimizada.
+This document details resource consumption using the **`gemini-2.5-flash`** model with the optimized "Continuous Flow" architecture.
 
-> **ESTADO ACTUAL:** Configuración de alta eficiencia. Máxima precisión posible al menor costo.
-
----
-
-## 1. Desglose por Petición (Request)
-
-El sistema utiliza un sistema de muestreo dinámico que se activa solo después de detectar movimiento y confirmar una pausa.
-
-### A. Costo de Entrada (Input Tokens)
-*   **Imágenes:** 4 frames a **480px** (Alta Calidad para precisión de dedos).
-    *   Tokenización Multimodal: ~258 tokens por imagen.
-    *   4 imágenes x 258 tokens = **1,032 tokens**.
-*   **Texto:**
-    *   Instrucciones del sistema + Historial de contexto.
-    *   Estimación promedio: **~300 tokens**.
-
-**Total por Petición:** ~1,332 Tokens.
-
-### B. Costo de Salida (Output Tokens)
-*   La respuesta es un JSON estricto.
-*   Estimación promedio: **~30-40 tokens**.
+> **CURRENT STATUS:** High-efficiency configuration. Maximum possible precision at the lowest cost.
 
 ---
 
-## 2. Escenarios de Uso (Free Tier)
+## 1. Breakdown per Request
 
-El plan gratuito de Google AI Studio es extremadamente generoso para este modelo.
+The system uses a dynamic sampling system that triggers only after detecting movement and confirming a pause.
 
-| Límite | Valor | Consumo App | Estado |
+### A. Input Cost (Input Tokens)
+*   **Images:** 4 frames at **480px** (High Quality for finger precision).
+    *   Multimodal Tokenization: ~258 tokens per image.
+    *   4 images x 258 tokens = **1,032 tokens**.
+*   **Text:**
+    *   System instructions + Context history.
+    *   Average estimate: **~300 tokens**.
+
+**Total per Request:** ~1,332 Tokens.
+
+### B. Output Cost (Output Tokens)
+*   The response is a strict JSON.
+*   Average estimate: **~30-40 tokens**.
+
+---
+
+## 2. Usage Scenarios (Free Tier)
+
+The Google AI Studio free tier is extremely generous for this model.
+
+| Limit | Value | App Consumption | Status |
 | :--- | :--- | :--- | :--- |
-| **RPM (Peticiones/min)** | 15 RPM | **~8 - 10 RPM** | **Seguro** ✅ |
-| **TPM (Tokens/min)** | 1 Millón TPM | ~13,500 TPM | Muy bajo |
-| **RPD (Peticiones/día)** | 1,500 RPD | - | Ver abajo |
+| **RPM (Requests/min)** | 15 RPM | **~8 - 10 RPM** | **Safe** ✅ |
+| **TPM (Tokens/min)** | 1 Million TPM | ~13,500 TPM | Very Low |
+| **RPD (Requests/day)** | 1,500 RPD | - | See below |
 
-### Duración de Uso Gratuito Diario
-Gracias al temporizador de "silencio" de 1.5 segundos que actúa como regulador natural:
-$$ 1,500 \text{ peticiones} / 9 \text{ RPM} \approx 2 \text{ horas y 45 minutos diarios de conversación continua.} $$
+### Daily Free Usage Duration
+Thanks to the 1.5-second "silence" timer acting as a natural regulator:
+$$ 1,500 \text{ requests} / 9 \text{ RPM} \approx 2 \text{ hours and 45 minutes of continuous conversation daily.} $$
 
 ---
 
-## 3. Análisis: Plan de Pago (Pay-as-you-go)
+## 3. Analysis: Pay-as-you-go Plan
 
-Si necesitas más de 3 horas diarias, el costo es trivial.
+If you require more than 3 hours daily, the cost is trivial.
 
-**Precios (Gemini 2.5 Flash):**
+**Pricing (Gemini 2.5 Flash):**
 *   Input: $0.075 / 1M tokens.
 *   Output: $0.30 / 1M tokens.
 
-### Costo por Hora de Uso Continuo
-1.  **Tokens de Entrada en 1 hora (60 min x 9 RPM):**
-    *   540 peticiones x 1,332 tokens = **719,280 tokens**.
-    *   Costo Input: ~$0.054 USD.
+### Cost per Hour of Continuous Usage
+1.  **Input Tokens in 1 hour (60 min x 9 RPM):**
+    *   540 requests x 1,332 tokens = **719,280 tokens**.
+    *   Input Cost: ~$0.054 USD.
 
-**Costo Total Estimado:** **~$0.05 - $0.06 USD por hora**.
+**Total Estimated Cost:** **~$0.05 - $0.06 USD per hour**.
 
 ---
 
-## 4. Resumen de Ingeniería
+## 4. Engineering Summary
 
-Hemos logrado un equilibrio ideal:
-1.  **Input de Alta Calidad:** Usamos imágenes de 480px (mejor que el estándar 320px) para que el modelo "Flash" vea mejor los detalles.
-2.  **Modelo Económico:** Usamos `gemini-2.5-flash` para mantener el costo casi nulo.
-3.  **Lógica Inteligente:** El código fuerza la precisión bajando la `temperature` a 0.1 y usando `topK` para evitar alucinaciones.
+We have achieved an ideal balance:
+1.  **High-Quality Input:** We use 480px images (better than the standard 320px) so the "Flash" model sees details better.
+2.  **Economical Model:** We use `gemini-2.5-flash` to keep costs near zero.
+3.  **Smart Logic:** The code forces precision by lowering `temperature` to 0.1 and using `topK` to prevent hallucinations.
