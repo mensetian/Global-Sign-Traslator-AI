@@ -11,6 +11,21 @@ const LANGUAGES = [
   { code: 'Portuguese', label: 'PT', full: 'Português' }
 ];
 
+// --- CALIBRACIÓN DE FLUJO "RELAJADO" ---
+const THRESHOLD_START = 0.5; 
+
+// Umbral ultra-bajo: La barra tiene que estar prácticamente vacía (3%)
+const THRESHOLD_SILENCE = 0.03; 
+
+// TIEMPO DE PAUSA REAL: 1.5 Segundos
+// Tienes que quedarte quieto 1.5s para que el sistema diga "Ok, terminó".
+const SILENCE_DURATION = 1500; 
+
+// Buffer para ignorar parpadeos de la cámara (Motion Blur)
+const HANDS_LOST_BUFFER = 400; 
+
+const MAX_RECORDING_DURATION = 10000; 
+
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [translationResult, setTranslationResult] = useState<TranslationResult | null>(null);
@@ -18,15 +33,28 @@ const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [isRateLimited, setIsRateLimited] = useState(false);
   
-  // INICIO SEGURO: Empezamos en PLAY (false)
+  // Feedback Visual
+  const [debugVelocity, setDebugVelocity] = useState(0); 
+  const [sessionFramesCount, setSessionFramesCount] = useState(0);
+
   const [isPaused, setIsPaused] = useState(false); 
-  
   const isPausedRef = useRef(isPaused);
   const cameraRef = useRef<CameraFeedHandle>(null);
-  const isRunningRef = useRef(true);
   const languageRef = useRef(targetLanguage);
   
   const lastTextRef = useRef("");
+  const lastTranslationTimeRef = useRef<number>(Date.now());
+
+  // --- MÁQUINA DE ESTADOS ---
+  const isRecordingRef = useRef<boolean>(false);
+  const recordingStartTimeRef = useRef<number>(0);
+  
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const handsLostTimerRef = useRef<number>(0); // Timestamp de cuando se perdieron las manos
+  
+  const sessionFramesRef = useRef<string[]>([]);
+  const lastCaptureTimeRef = useRef<number>(0);
+  const processingRef = useRef(false);
 
   const t = TRANSLATIONS[targetLanguage as LanguageCode] || TRANSLATIONS.Spanish;
 
@@ -35,151 +63,227 @@ const App: React.FC = () => {
   }, [targetLanguage]);
   
   useEffect(() => {
-    if (isPaused) {
-       // Paused logic if needed
-    }
-  }, [isPaused]);
-
-  useEffect(() => {
     isPausedRef.current = isPaused;
-    
-    if (!isPaused) {
-      setAppState(AppState.ANALYZING);
-      // Give camera time to warm up (1.5s)
-      const timer = setTimeout(() => {
-         if (isRunningRef.current && !isPausedRef.current) processFrame();
-      }, 1500);
-      return () => clearTimeout(timer);
-    } else {
+    if (isPaused) {
       setAppState(AppState.IDLE);
       setIsActive(false);
+      resetSession();
+    } else {
+        setAppState(AppState.IDLE);
     }
   }, [isPaused]);
 
-  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const resetSession = () => {
+      sessionFramesRef.current = [];
+      isRecordingRef.current = false;
+      recordingStartTimeRef.current = 0;
+      setSessionFramesCount(0);
+      handsLostTimerRef.current = 0;
+      
+      if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+      }
+  };
 
-  const processFrame = useCallback(async () => {
-    if (!isRunningRef.current || isPausedRef.current) return;
-    if (isRateLimited) return;
+  // --- LOOP PRINCIPAL (30ms) ---
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+        if (isPausedRef.current || isRateLimited || processingRef.current) return;
+        if (!cameraRef.current) return;
 
-    // --- 1. Detección Local de Manos (Cliente) ---
-    // Si no hay manos, no gastamos cuota de API.
-    const hasHands = cameraRef.current?.isHandDetected;
-
-    if (!hasHands) {
-        // UI Feedback: Cambiar a modo búsqueda si estábamos activos
-        if (appState !== AppState.IDLE) setAppState(AppState.IDLE);
+        const rawHandDetected = cameraRef.current.isHandDetected;
+        const velocity = cameraRef.current.getHandVelocity();
+        const now = Date.now();
         
-        // Volver a revisar muy rápido (100ms) para sentir que es "Tiempo Real"
-        setTimeout(() => {
-            if (isRunningRef.current && !isPausedRef.current) processFrame();
-        }, 100);
-        return;
-    }
+        setDebugVelocity(velocity);
+        setSessionFramesCount(sessionFramesRef.current.length);
 
-    // --- 2. Captura en Ráfaga (Burst Capture) ---
-    // Solo llegamos aquí si hay manos detectadas
-    const frames: string[] = [];
-    
-    // Frame 1 (T=0ms)
-    const f1 = cameraRef.current?.captureFrame();
-    if (f1) frames.push(f1);
-    
-    await wait(80);
-    
-    // Frame 2 (T=80ms)
-    const f2 = cameraRef.current?.captureFrame();
-    if (f2) frames.push(f2);
-    
-    await wait(80);
-    
-    // Frame 3 (T=160ms)
-    const f3 = cameraRef.current?.captureFrame();
-    if (f3) frames.push(f3);
+        // ==========================================================
+        // 1. GESTIÓN DE PÉRDIDA DE RASTREO (ANTI-FLICKER)
+        // ==========================================================
+        let effectiveHandDetected = rawHandDetected;
 
-    // Solo procesamos si tenemos al menos 2 frames válidos para detectar movimiento
-    if (frames.length >= 1) {
-      setIsActive(true); 
+        if (!rawHandDetected) {
+            // Si acabamos de perder las manos, marcamos el tiempo
+            if (handsLostTimerRef.current === 0) {
+                handsLostTimerRef.current = now;
+            }
+            
+            // Si ha pasado poco tiempo, FINGIMOS que las manos siguen ahí
+            // Esto evita cortes por movimiento rápido (motion blur)
+            if (now - handsLostTimerRef.current < HANDS_LOST_BUFFER) {
+                effectiveHandDetected = true; 
+            }
+        } else {
+            // Si volvieron las manos, reseteamos el timer de pérdida
+            handsLostTimerRef.current = 0;
+        }
+
+        // ==========================================================
+        // 2. LÓGICA DE DETECCIÓN DE FINAL (MANOS BAJADAS REALMENTE)
+        // ==========================================================
+        if (!effectiveHandDetected) {
+             // Solo si las manos se han ido por MÁS de 400ms confirmamos la salida
+             if (isRecordingRef.current && sessionFramesRef.current.length >= 2) {
+                 triggerTranslation("HANDS_EXIT_CONFIRMED");
+             } else {
+                 if (sessionFramesRef.current.length > 0) resetSession();
+             }
+             return; // Salimos del loop, no capturamos frames vacíos
+        }
+
+        // ==========================================================
+        // 3. LÓGICA DE GRABACIÓN
+        // ==========================================================
+        
+        if (isRecordingRef.current) {
+            // --- ESTAMOS GRABANDO ---
+
+            // A. Captura Frames
+            if (now - lastCaptureTimeRef.current > 70) { 
+                const frame = cameraRef.current.captureFrame();
+                if (frame) {
+                    sessionFramesRef.current.push(frame);
+                    if (sessionFramesRef.current.length > 25) {
+                         sessionFramesRef.current.splice(1, 1); 
+                    }
+                    lastCaptureTimeRef.current = now;
+                }
+            }
+
+            // B. Chequeo de Movimiento (LA BARRA)
+            // Usamos 0.03 como umbral. Si te mueves, reiniciamos el timer.
+            if (velocity > THRESHOLD_SILENCE) {
+                if (silenceTimerRef.current) {
+                    clearTimeout(silenceTimerRef.current);
+                    silenceTimerRef.current = null;
+                }
+            } else {
+                // BARRA VACÍA: Iniciamos cuenta atrás
+                if (!silenceTimerRef.current) {
+                    silenceTimerRef.current = setTimeout(() => {
+                        triggerTranslation("SILENCE_TIMEOUT");
+                    }, SILENCE_DURATION);
+                }
+            }
+
+            // C. Timeout máximo
+            if (now - recordingStartTimeRef.current > MAX_RECORDING_DURATION) {
+                triggerTranslation("MAX_DURATION");
+            }
+
+        } else {
+            // --- ESTADO IDLE ---
+            // Solo empezamos si hay un movimiento decidido
+            if (velocity > THRESHOLD_START) {
+                isRecordingRef.current = true;
+                recordingStartTimeRef.current = now;
+                setAppState(AppState.CAPTURING);
+
+                const frame = cameraRef.current.captureFrame();
+                if (frame) sessionFramesRef.current = [frame];
+                lastCaptureTimeRef.current = now;
+            }
+        }
+
+    }, 30);
+
+    return () => clearInterval(intervalId);
+  }, [isPaused, isRateLimited, appState]);
+
+
+  const triggerTranslation = async (triggerSource: string) => {
+      // Limpiar timers
+      if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+      }
+      handsLostTimerRef.current = 0;
+
+      if (processingRef.current) return;
+      
+      const frames = sessionFramesRef.current;
+      
+      // Filtro de ruido
+      if (frames.length < 3) {
+          resetSession();
+          setAppState(AppState.IDLE);
+          return;
+      }
+
+      processingRef.current = true;
+      setIsActive(true);
       setAppState(AppState.ANALYZING);
-      const startTime = Date.now();
 
       try {
-        // --- GESTIÓN INTELIGENTE DE CONTEXTO ---
-        let safeContext = lastTextRef.current;
-        const sentences = safeContext.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [];
-        if (sentences.length > 1) {
-            safeContext = sentences[sentences.length - 1].trim();
-        } else if (safeContext.length > 100) {
-            safeContext = "..." + safeContext.slice(-100);
-        }
-        
-        const result = await sendImageToGemini(frames, languageRef.current, safeContext);
-        
-        if (isPausedRef.current) {
-             setIsActive(false);
+          // MUESTREO DE FRAMES
+          let payloadFrames: string[] = [];
+          
+          if (frames.length <= 4) {
+              payloadFrames = frames;
+          } else {
+              // 4 Frames distribuidos
+              payloadFrames = [
+                  frames[0], 
+                  frames[Math.floor(frames.length * 0.33)], 
+                  frames[Math.floor(frames.length * 0.66)], 
+                  frames[frames.length - 1] 
+              ];
+          }
+
+          console.log(`Trigger [${triggerSource}]: Sending ${payloadFrames.length} frames.`);
+
+          resetSession();
+
+          let safeContext = lastTextRef.current;
+          const timeSinceLast = Date.now() - lastTranslationTimeRef.current;
+          if (timeSinceLast > 15000) safeContext = ""; 
+          
+          const words = safeContext.split(' ').filter(w => w.length > 0);
+          if (words.length > 30) safeContext = "..." + words.slice(-30).join(' ');
+
+          const result = await sendImageToGemini(payloadFrames, languageRef.current, safeContext);
+
+          if (isPausedRef.current) return;
+
+          if (result.traduccion && result.traduccion !== "..." && result.traduccion.trim().length > 0) {
+              setTranslationResult(result);
+              
+              const cleanNew = result.traduccion.trim();
+              const cleanOld = safeContext.replace('...', '').trim();
+              
+              if (cleanNew.length >= cleanOld.length && cleanNew !== cleanOld) {
+                  lastTextRef.current = result.traduccion;
+                  lastTranslationTimeRef.current = Date.now();
+              }
+              setAppState(AppState.SUCCESS);
+          } else {
              setAppState(AppState.IDLE);
-             return; 
-        }
-        
-        // Actualizar UI
-        if (result.traduccion && result.traduccion !== "..." && result.traduccion.trim().length > 0) {
-             setTranslationResult(result);
-             lastTextRef.current = result.traduccion; 
-        }
-        setAppState(AppState.SUCCESS);
-
-        const elapsed = Date.now() - startTime;
-        // Si detectamos manos y procesamos con éxito, esperamos un poco más para respetar Rate Limits.
-        // Como solo llamamos cuando hay manos, podemos permitirnos ser un poco más agresivos (2s)
-        const minimumDelay = 2500; 
-        const nextDelay = Math.max(0, minimumDelay - elapsed);
-
-        setTimeout(() => {
-            if (isRunningRef.current && !isPausedRef.current) processFrame();
-        }, nextDelay);
+          }
 
       } catch (error: any) {
-        const errString = error?.message || error?.toString() || JSON.stringify(error) || '';
-        const isQuotaError = errString.includes('429') || errString.includes('quota') || errString.includes('RESOURCE_EXHAUSTED');
-
-        if (isQuotaError) {
-          console.warn("Loop error (Quota): Rate Limit hit. Pausing for 10s...");
-          setIsRateLimited(true);
-          setTimeout(() => {
-            setIsRateLimited(false);
-            if (isRunningRef.current && !isPausedRef.current) processFrame();
-          }, 10000); 
-        } else {
-          console.error("Loop error:", error);
-          // Error genérico, esperar 2s y reintentar
-          setTimeout(() => {
-              if (isRunningRef.current && !isPausedRef.current) processFrame();
-          }, 2000);
-        }
+         console.error(error);
+         const errString = error?.message || "";
+         if (errString.includes('429')) {
+             setIsRateLimited(true);
+             setTimeout(() => setIsRateLimited(false), 10000);
+         }
+         setAppState(AppState.ERROR);
       } finally {
-        if (!isPausedRef.current) {
-            setIsActive(false);
-        }
+          setIsActive(false);
+          processingRef.current = false;
+          setTimeout(() => {
+               if (!processingRef.current) setAppState(AppState.IDLE);
+          }, 300);
       }
-    } else {
-      // Si la cámara no está lista (frames vacíos), esperar antes de reintentar
-      setTimeout(() => {
-          if (isRunningRef.current && !isPausedRef.current) processFrame();
-      }, 1000);
-    }
-  }, [isRateLimited, appState]);
+  };
 
-  useEffect(() => {
-    isRunningRef.current = true;
-    return () => {
-      isRunningRef.current = false;
-    };
-  }, []);
 
   return (
     <div className="h-dvh w-screen bg-vibe-bg flex flex-col items-center justify-between overflow-hidden relative font-sans">
       
-      {/* HEADER INTEGRADO */}
+      {/* HEADER */}
       <div className={`
         w-full flex flex-col items-center pt-6 pb-2 px-4 z-40 space-y-4 
         bg-gradient-to-b from-vibe-bg to-transparent
@@ -187,7 +291,7 @@ const App: React.FC = () => {
         md:landscape:relative md:landscape:flex-col md:landscape:items-center md:landscape:justify-start md:landscape:bg-gradient-to-b md:landscape:pt-6 md:landscape:space-y-4 md:landscape:pointer-events-auto
       `}>
         <h1 className="text-white/30 font-light tracking-[0.3em] text-[10px] uppercase select-none landscape:hidden md:landscape:block text-center">
-          Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Powered by Gemini</span>
+          Global Sign Translator <span className="block md:inline text-[9px] text-vibe-neon opacity-70 mt-1 md:mt-0 md:ml-2">Build with Gemini 3</span>
         </h1>
 
         <div className="flex items-center gap-4 pointer-events-auto">
@@ -226,6 +330,40 @@ const App: React.FC = () => {
             isFlashing={isActive}
             langCode={targetLanguage}
           />
+
+          {/* INDICADOR KINETICO DEBUG */}
+          <div className="absolute top-16 left-4 z-50 flex flex-col gap-1 pointer-events-none transition-opacity duration-300">
+             
+             {/* Barra de Velocidad */}
+             <div className="flex gap-1 h-1 w-24 bg-black/60 backdrop-blur rounded-full overflow-hidden border border-white/10 relative">
+                 {/* Marca de umbral */}
+                <div className="absolute left-[3%] top-0 bottom-0 w-0.5 bg-red-500/50 z-10"></div>
+                <div 
+                    className={`h-full transition-all duration-75 ease-out ${debugVelocity > THRESHOLD_START ? 'bg-vibe-neon' : (debugVelocity > THRESHOLD_SILENCE ? 'bg-blue-400' : (silenceTimerRef.current ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500'))}`}
+                    style={{ width: `${Math.min(100, debugVelocity * 30)}%` }}
+                />
+             </div>
+             
+             {/* Indicador de grabación de frames */}
+             <div className="flex gap-0.5 mt-1 h-1 w-24">
+                {Array.from({ length: 8 }).map((_, i) => (
+                    <div 
+                        key={i} 
+                        className={`flex-1 rounded-sm transition-colors duration-100 ${i < sessionFramesCount ? 'bg-red-500' : 'bg-white/5'}`}
+                    />
+                ))}
+             </div>
+             
+             {/* Text Status */}
+             <div className="flex justify-between w-24 mt-0.5">
+               <span className="text-[7px] text-white/40 tracking-widest uppercase">REC</span>
+               <span className={`text-[7px] tracking-widest uppercase font-bold 
+                 ${processingRef.current ? 'text-vibe-neon animate-pulse' : (silenceTimerRef.current ? 'text-yellow-400' : (isRecordingRef.current ? 'text-red-500' : 'text-white/20'))}
+               `}>
+                 {processingRef.current ? 'THINKING' : (silenceTimerRef.current ? 'WAITING...' : (isRecordingRef.current ? 'RECORDING' : 'IDLE'))}
+               </span>
+             </div>
+          </div>
 
           <div className="absolute top-4 right-4 z-50 flex gap-3">
             <button

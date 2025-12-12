@@ -1,36 +1,33 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TranslationResult } from '../types';
 
-// ==========================================
-// CONFIGURACIÓN DE MODO DEMO
-// ==========================================
-const IS_DEMO_MODE = false; 
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-let demoStartTime = 0;
-const ai = !IS_DEMO_MODE ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
-
-const DEMO_SCRIPTS: Record<string, { t1: string, t2: string, t3: string, t4: string }> = {
-  'Spanish': { t1: "Hola", t2: "Hola. ¿Cómo estás?", t3: "Quiero café", t4: "Te amo" },
-  'English': { t1: "Hello", t2: "Hello. How are you?", t3: "I want coffee", t4: "I love you" },
-  'Portuguese': { t1: "Olá", t2: "Olá. Como vai?", t3: "Quero café", t4: "Eu te amo" }
-};
-
-// PROMPT SIMPLIFICADO Y ROBUSTO
+// PROMPT OPTIMIZADO PARA GEMINI 2.5 FLASH
+// Flash es rápido pero necesita instrucciones muy directas para no alucinar.
 const SYSTEM_INSTRUCTION = `
-You are an expert Sign Language Translator.
-Task: Analyze the sequence of 3 images (video burst) and identify the ASL sign being performed.
+You are a Sign Language Interpreter.
+INPUT: 4 sequential video frames + Previous Context.
+OUTPUT: JSON with translation.
 
-Context:
-- The user is performing a sign.
-- "Previous Context" is the text already translated.
+METHOD (5 Parameters of ASL):
+1. **Handshape:** Look at the fingers.
+2. **Orientation:** Palm facing?
+3. **Location:** Relative to body.
+4. **Movement:** Path of the hand.
+5. **Expression:** Face markers.
 
-Instructions:
-1. Identify the sign clearly (e.g., "Hello", "Thank you", "Family").
-2. Return ONLY the translation of the current gesture.
-3. If the user is holding the SAME sign as the previous context, repeat the word.
-4. If no clear sign is detected (hands down, blurry, nothing), return "...".
+RULES:
+- **Merge:** If the sign fits the previous context, complete the sentence.
+- **Precision:** If the movement is unclear or hands are resting/blur, return "...".
+- **Strict:** Do not guess. Only translate what is clearly visible.
 
-Return JSON.
+OUTPUT JSON:
+{
+  "traduccion": "text",
+  "confianza_modelo": "High" | "Low",
+  "target_language": "..."
+}
 `;
 
 export const sendImageToGemini = async (
@@ -38,35 +35,14 @@ export const sendImageToGemini = async (
   targetLanguage: string,
   previousContext: string = ""
 ): Promise<TranslationResult> => {
-  // --- MODO DEMO ---
-  if (IS_DEMO_MODE) {
-    if (demoStartTime === 0) demoStartTime = Date.now();
-    const elapsed = Date.now() - demoStartTime;
-    let demoText = "...";
-    const script = DEMO_SCRIPTS[targetLanguage] || DEMO_SCRIPTS['Spanish'];
-
-    if (elapsed < 3000) demoText = "..."; 
-    else if (elapsed < 7000) demoText = script.t1;
-    else if (elapsed < 14000) demoText = script.t2; 
-    else if (elapsed < 21000) demoText = script.t3;
-    else if (elapsed < 28000) demoText = script.t4; 
-    else { demoStartTime = Date.now(); demoText = "..."; }
-    
-    await new Promise(resolve => setTimeout(resolve, 800));
-    return { translation: demoText, confidence: demoText === "..." ? "Low" : "High" } as any;
-  }
-
-  // --- MODO PRODUCCIÓN ---
   try {
-    if (!ai) throw new Error("Gemini Client not initialized.");
-
     const framesArray = Array.isArray(frames) ? frames : [frames];
     const contentsParts: any[] = [];
 
     // Validar frames
     let validFrames = 0;
     framesArray.forEach(frame => {
-      if (frame && frame.length > 100) { // Simple check de longitud base64
+      if (frame && frame.length > 100) { 
         const cleanBase64 = frame.split(',')[1] || frame;
         contentsParts.push({
           inlineData: {
@@ -85,7 +61,7 @@ export const sendImageToGemini = async (
     contentsParts.push({
       text: `Target Language: ${targetLanguage}.
 Previous Context: "${previousContext}".
-Identify the sign.`
+Translate.`
     });
 
     const response = await ai.models.generateContent({
@@ -94,7 +70,10 @@ Identify the sign.`
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
-        temperature: 0.4, // Un poco más de creatividad ayuda a inferir gestos no perfectos
+        // AJUSTES DE PRECISIÓN PARA FLASH
+        temperature: 0.1, // Muy baja para evitar creatividad/alucinaciones
+        topK: 32, // Restringir el espacio de búsqueda
+        topP: 0.8, // Núcleo de probabilidad más estricto
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -114,14 +93,13 @@ Identify the sign.`
     return JSON.parse(cleanedText) as TranslationResult;
 
   } catch (error: any) {
-    // CRITICAL FIX: Check if it's a quota error before suppressing it
     const errorMsg = error?.message || error?.toString() || JSON.stringify(error);
     if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota")) {
       console.warn("Quota exceeded in Service, rethrowing...");
-      throw error; // Let App.tsx handle the backoff
+      throw error; 
     }
     
-    console.error("Gemini Error (Recoverable):", error);
+    console.error("Gemini Error:", error);
     return {
       traduccion: "...",
       confianza_modelo: "Low",

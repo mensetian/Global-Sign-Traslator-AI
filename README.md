@@ -5,7 +5,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![React](https://img.shields.io/badge/React-19-blue)
-![Gemini](https://img.shields.io/badge/Google%20AI-Gemini%202.5-orange)
+![Gemini](https://img.shields.io/badge/Google%20AI-Gemini%202.5%20Flash-orange)
 
 ## 🚀 Overview
 
@@ -15,11 +15,11 @@ Unlike traditional classifiers that only recognize static images (A, B, C...), t
 
 ## ✨ Key Features
 
-*   **Real-Time "Burst Mode" Analysis:** Captures a sequence of 3 frames (approx. 160ms window) to detect motion and dynamic signs, not just static poses.
+*   **Real-Time "Continuous Flow" Analysis:** Uses a smart 1.5s silence timer to detect when a sign is finished before sending data, ensuring complete sentence capture.
 *   **Contextual Memory:** The AI remembers previous words to construct grammatically correct sentences (e.g., merging "I" + "Want" -> "I want").
 *   **Multilingual Support:** Translates ASL directly into **Spanish, English, and Portuguese**.
 *   **Privacy First:** All processing is done via secure API calls; images are ephemeral and not stored permanently.
-*   **High Performance:** Optimized image downscaling and burst capture for low-latency feedback.
+*   **High Precision Mode:** Optimized inputs (480px resolution) and strict temperature settings to maximize accuracy.
 
 ---
 
@@ -30,13 +30,13 @@ Unlike traditional classifiers that only recognize static images (A, B, C...), t
 *   **AI Model:** Google Gemini 2.5 Flash (via `@google/genai` SDK)
 *   **Hardware Access:** Native WebRTC (`navigator.mediaDevices`)
 
-### 🧠 Why Gemini 2.5 Flash and not Gemini 3.0 Pro?
+### 🧠 Why Gemini 2.5 Flash?
 
-We deliberately chose **`gemini-2.5-flash`** over the newer **`gemini-3-pro-preview`** for this specific use case. Here is the engineering reasoning:
+We deliberately chose **`gemini-2.5-flash`** as our core engine. Here is the engineering reasoning:
 
-1.  **Latency is King:** For a real-time translator, the user experience depends on immediate feedback. The "Flash" model family is architected for **high throughput and low latency**. The "Pro" models, while having superior reasoning capabilities for complex tasks (like advanced math or coding), introduce a processing delay that breaks the natural flow of conversation.
-2.  **Visual Recognition Speed:** 2.5 Flash is exceptionally fast at processing multimodal inputs (video frames). We need the AI to identify a visual pattern in milliseconds, not deeply analyze the philosophical meaning of the image.
-3.  **Efficiency:** Sending a 3-frame burst every few seconds requires a lightweight, responsive model. Using a Pro model would be overkill for visual recognition and would result in a sluggish UI (waiting 2-3 seconds per sign vs sub-second responses).
+1.  **Cost Efficiency:** At ~$0.05/hour of continuous use, it is 50x cheaper than Pro models, making accessible technology affordable for everyone.
+2.  **Latency is King:** For a real-time translator, the user experience depends on immediate feedback. The "Flash" model family is architected for **high throughput**.
+3.  **Precision Engineering:** We compensate for the smaller model size by feeding it higher resolution images (480px) and using strict temperature controls (0.1) to prevent hallucinations.
 
 ---
 
@@ -70,16 +70,7 @@ We deliberately chose **`gemini-2.5-flash`** over the newer **`gemini-3-pro-prev
     VITE_API_KEY=your_gemini_api_key_here
     ```
 
-4.  **⚠️ IMPORTANT: Disable Demo Mode**
-    By default, the app might be in **DEMO MODE** (simulating translation for testing UI without API costs).
-    
-    Open `services/geminiService.ts` and change:
-    ```typescript
-    // Change this to FALSE to use the real Gemini API
-    const IS_DEMO_MODE = false; 
-    ```
-
-5.  **Run the App**
+4.  **Run the App**
     ```bash
     npm start
     # or
@@ -88,27 +79,11 @@ We deliberately chose **`gemini-2.5-flash`** over the newer **`gemini-3-pro-prev
 
 ---
 
-## 📖 How It Works (Simplified)
-
-1.  **Capture:** The `CameraFeed` component captures video frames.
-2.  **Burst:** Every cycle, the app captures **3 frames** spaced 80ms apart.
-3.  **Context:** The app bundles these images with the **current text on screen**.
-4.  **Inference:** It sends this payload to Gemini 2.5 Flash.
-5.  **Instruction:** The System Prompt tells Gemini to:
-    *   Identify the sign in the video.
-    *   Decide if it flows from the previous text (merge) or is a new idea (punctuation).
-    *   Return the updated sentence.
-6.  **Update:** The UI updates with the new translation.
-
-*For a deep dive into the architecture, context management, and optimization strategies, read the [TECHNICAL_DOCS.md](./TECHNICAL_DOCS.md).*
-
----
-
 ## ⚡ Performance Tips
 
 *   **Lighting:** Ensure the signer is well-lit.
 *   **Background:** A plain background helps the AI focus on hand movements.
-*   **Camera:** A higher frame rate webcam (30fps+) yields better motion detection results.
+*   **Camera:** The app automatically requests 480px resolution for better finger tracking.
 
 ---
 

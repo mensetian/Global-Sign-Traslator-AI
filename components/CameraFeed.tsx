@@ -12,28 +12,33 @@ interface CameraFeedProps {
 export interface CameraFeedHandle {
   captureFrame: () => string | null;
   toggleCamera: () => void;
-  isHandDetected: boolean; // Propiedad expuesta para verificar si hay manos
+  isHandDetected: boolean;
+  getHandVelocity: () => number; // 0 = quieto, >1 = movimiento
 }
 
 const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, langCode }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null); // Canvas para captura (invisible)
-  const overlayRef = useRef<HTMLCanvasElement>(null); // Canvas para dibujar esqueleto (visible)
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isPermissionDenied, setIsPermissionDenied] = useState(false);
   
-  // ESTADO: Controlamos el modo deseado ('user' = Frontal, 'environment' = Trasera)
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [isMirrored, setIsMirrored] = useState(false);
 
   // MediaPipe Refs
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const requestRef = useRef<number>(null);
-  const isHandDetectedRef = useRef<boolean>(false); // Ref interno para acceso síncrono
+  const isHandDetectedRef = useRef<boolean>(false);
+  
+  const latestLandmarksRef = useRef<any[] | null>(null);
+  
+  // VELOCITY TRACKING (SMOOTHED)
+  const prevLandmarksRef = useRef<any[] | null>(null);
+  const smoothedVelocityRef = useRef<number>(0); 
 
   const t = TRANSLATIONS[langCode as LanguageCode] || TRANSLATIONS.Spanish;
 
-  // Inicializar MediaPipe HandLandmarker
   useEffect(() => {
     const initMediaPipe = async () => {
       try {
@@ -46,7 +51,10 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
             delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 2
+          numHands: 2,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
         });
         console.log("HandLandmarker loaded");
       } catch (error) {
@@ -56,7 +64,74 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
     initMediaPipe();
   }, []);
 
-  const drawHands = (result: any) => {
+  const calculateVelocity = (currentLandmarks: any[]) => {
+    if (!prevLandmarksRef.current || prevLandmarksRef.current.length === 0) {
+      prevLandmarksRef.current = currentLandmarks;
+      return 0;
+    }
+
+    let totalDelta = 0;
+    let points = 0;
+
+    // Analizamos la primera mano detectada
+    const hand1Curr = currentLandmarks[0];
+    const hand1Prev = prevLandmarksRef.current[0];
+
+    if (hand1Curr && hand1Prev) {
+      // Puntos clave: Muñeca (0), Índice(8), Medio(12), Pulgar(4)
+      const keypoints = [0, 8, 12]; 
+      
+      for (const idx of keypoints) {
+        const p1 = hand1Curr[idx];
+        const p2 = hand1Prev[idx];
+        if (p1 && p2) {
+           const dist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+           totalDelta += dist;
+           points++;
+        }
+      }
+    }
+
+    prevLandmarksRef.current = currentLandmarks;
+    
+    // Velocidad instantánea normalizada 
+    const rawVelocity = points > 0 ? (totalDelta / points) * 200 : 0; 
+    
+    // SUAVIZADO (EMA) - Adjusted from 0.75 to 0.6 for smoother results
+    const alpha = 0.6;
+    smoothedVelocityRef.current = (alpha * rawVelocity) + ((1 - alpha) * smoothedVelocityRef.current);
+    
+    // Filtro de ruido
+    if (smoothedVelocityRef.current < 0.12) smoothedVelocityRef.current = 0;
+
+    return smoothedVelocityRef.current;
+  };
+
+  const drawSkeletonOnContext = (ctx: CanvasRenderingContext2D, landmarksList: any[], width: number, height: number) => {
+    for (const landmarks of landmarksList) {
+       const connections = HandLandmarker.HAND_CONNECTIONS;
+       ctx.strokeStyle = "#00f3ff";
+       ctx.lineWidth = 2;
+       for (const connection of connections) {
+          const start = landmarks[connection[0]];
+          const end = landmarks[connection[1]];
+          if (start && end) {
+             ctx.beginPath();
+             ctx.moveTo(start.x * width, start.y * height);
+             ctx.lineTo(end.x * width, end.y * height);
+             ctx.stroke();
+          }
+       }
+       ctx.fillStyle = "#FF0000";
+       for (const landmark of landmarks) {
+          ctx.beginPath();
+          ctx.arc(landmark.x * width, landmark.y * height, 2, 0, 2 * Math.PI);
+          ctx.fill();
+       }
+    }
+  };
+
+  const drawHandsToOverlay = (result: any) => {
     const canvas = overlayRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
@@ -66,44 +141,13 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Ajustar tamaño del canvas al video
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
     }
 
     if (result.landmarks) {
-      for (const landmarks of result.landmarks) {
-        // Dibujar conectores
-        drawConnectors(ctx, landmarks, HandLandmarker.HAND_CONNECTIONS, { color: "#00f3ff", lineWidth: 2 });
-        // Dibujar puntos
-        drawLandmarks(ctx, landmarks, { color: "#FF0000", lineWidth: 1, radius: 3 });
-      }
-    }
-  };
-
-  // Funciones auxiliares de dibujo manuales para no depender de librerías externas de dibujo
-  const drawConnectors = (ctx: CanvasRenderingContext2D, landmarks: any[], connections: any[], style: any) => {
-    ctx.strokeStyle = style.color;
-    ctx.lineWidth = style.lineWidth;
-    for (const connection of connections) {
-      const start = landmarks[connection[0]];
-      const end = landmarks[connection[1]];
-      if (start && end) {
-        ctx.beginPath();
-        ctx.moveTo(start.x * ctx.canvas.width, start.y * ctx.canvas.height);
-        ctx.lineTo(end.x * ctx.canvas.width, end.y * ctx.canvas.height);
-        ctx.stroke();
-      }
-    }
-  };
-
-  const drawLandmarks = (ctx: CanvasRenderingContext2D, landmarks: any[], style: any) => {
-    ctx.fillStyle = style.color;
-    for (const landmark of landmarks) {
-      ctx.beginPath();
-      ctx.arc(landmark.x * ctx.canvas.width, landmark.y * ctx.canvas.height, style.radius, 0, 2 * Math.PI);
-      ctx.fill();
+       drawSkeletonOnContext(ctx, result.landmarks, canvas.width, canvas.height);
     }
   };
 
@@ -118,9 +162,14 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
       
       if (results.landmarks && results.landmarks.length > 0) {
         isHandDetectedRef.current = true;
-        drawHands(results);
+        latestLandmarksRef.current = results.landmarks;
+        calculateVelocity(results.landmarks);
+        drawHandsToOverlay(results);
       } else {
         isHandDetectedRef.current = false;
+        latestLandmarksRef.current = null;
+        // Si se pierden las manos, velocidad a 0 inmediatamente
+        smoothedVelocityRef.current = 0;
         const ctx = overlayRef.current?.getContext('2d');
         ctx?.clearRect(0, 0, overlayRef.current?.width || 0, overlayRef.current?.height || 0);
       }
@@ -128,7 +177,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
     requestRef.current = requestAnimationFrame(predictWebcam);
   };
 
-  // Función para encontrar la MEJOR cámara
+  // ... (Device logic unchanged)
   const findBestDeviceId = async (mode: 'user' | 'environment'): Promise<string | null> => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
@@ -164,32 +213,6 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
   const toggleCamera = () => {
     setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
   };
-
-  useImperativeHandle(ref, () => ({
-    captureFrame: () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (video && canvas) {
-        if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
-            return null;
-        }
-        const context = canvas.getContext('2d');
-        if (context) {
-          const scaleFactor = 320 / video.videoWidth;
-          canvas.width = 320;
-          canvas.height = video.videoHeight * scaleFactor;
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          // IMPORTANTE: Captura imagen limpia (sin esqueleto)
-          return canvas.toDataURL('image/jpeg', 0.6); 
-        }
-      }
-      return null;
-    },
-    toggleCamera,
-    get isHandDetected() {
-        return isHandDetectedRef.current;
-    }
-  }));
 
   const stopCamera = () => {
     if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -228,7 +251,6 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
             videoRef.current.srcObject = stream;
             videoRef.current.onloadedmetadata = () => {
                 videoRef.current?.play().catch(e => console.error("Error play:", e));
-                // Iniciar detección cuando el video arranca
                 predictWebcam();
             };
         }
@@ -251,6 +273,41 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
         stopCamera();
     };
   }, [facingMode]);
+
+  useImperativeHandle(ref, () => ({
+    captureFrame: () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (video && canvas) {
+        if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+            return null;
+        }
+        const context = canvas.getContext('2d');
+        if (context) {
+          // AUMENTAMOS LA RESOLUCIÓN DE CAPTURA PARA GEMINI PRO
+          const targetWidth = 480; // Antes 320. Más píxeles = mejor precisión de dedos.
+          const scaleFactor = targetWidth / video.videoWidth;
+          canvas.width = targetWidth;
+          canvas.height = video.videoHeight * scaleFactor;
+          
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          if (latestLandmarksRef.current) {
+             drawSkeletonOnContext(context, latestLandmarksRef.current, canvas.width, canvas.height);
+          }
+          // Mejor calidad de compresión para el modelo Pro
+          return canvas.toDataURL('image/jpeg', 0.7); 
+        }
+      }
+      return null;
+    },
+    toggleCamera,
+    get isHandDetected() {
+        return isHandDetectedRef.current;
+    },
+    getHandVelocity: () => {
+        return smoothedVelocityRef.current;
+    }
+  }));
 
   return (
     <div 
@@ -280,7 +337,6 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
               muted
               className={`w-full h-full object-cover opacity-90 ${isMirrored ? 'transform scale-x-[-1]' : ''}`} 
             />
-            {/* Capa de Visualización (Esqueleto) */}
             <canvas 
                 ref={overlayRef}
                 className={`absolute inset-0 w-full h-full pointer-events-none ${isMirrored ? 'transform scale-x-[-1]' : ''}`}
@@ -290,9 +346,11 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(({ isFlashing, 
       <canvas ref={canvasRef} className="hidden" />
       
       {!streamError && (
-        <div className="absolute top-4 left-4 flex items-center space-x-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/5 z-20 pointer-events-none">
-          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-          <span className="text-[10px] font-bold tracking-widest text-white/80">{t.live}</span>
+        <div className="absolute top-4 left-4 flex flex-col items-start gap-1 z-20 pointer-events-none">
+          <div className="flex items-center space-x-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/5">
+             <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+             <span className="text-[10px] font-bold tracking-widest text-white/80">{t.live}</span>
+          </div>
         </div>
       )}
     </div>

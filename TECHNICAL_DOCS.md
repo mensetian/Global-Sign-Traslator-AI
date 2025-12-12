@@ -1,98 +1,99 @@
 # Documentación Técnica: Global Sign Translator
 
-Este documento describe la arquitectura técnica, el flujo de datos y las decisiones de ingeniería detrás del **Global Sign Translator**. El sistema utiliza Inteligencia Artificial Multimodal (Visión + Texto) para traducir lengua de señas en tiempo real.
+Este documento describe la arquitectura técnica, el flujo de datos y las decisiones de ingeniería detrás del **Global Sign Translator**. El sistema utiliza Inteligencia Artificial Multimodal (Visión + Texto) para traducir lengua de señas en tiempo real, optimizado para el modelo **Gemini 2.5 Flash**.
 
 ---
 
 ## 1. Arquitectura General
 
-La aplicación es una Single Page Application (SPA) construida con **React 19** y **TypeScript**. No utiliza un backend tradicional; toda la lógica de procesamiento reside en el cliente (navegador), comunicándose directamente con la API de **Google Gemini 2.5 Flash**.
+La aplicación es una Single Page Application (SPA) construida con **React 19** y **TypeScript**. No utiliza un backend tradicional; toda la lógica de procesamiento reside en el cliente (navegador), comunicándose directamente con la API de **Google GenAI SDK**.
 
 ### Componentes Principales
 
-1.  **`App.tsx`**: Controlador principal (Orquestador). Gestiona el ciclo de vida de captura, el estado de la aplicación (Idle, Analyzing, Success) y la memoria de contexto.
-2.  **`CameraFeed.tsx`**: Abstracción del hardware. Maneja el stream de video (`getUserMedia`), los permisos y la optimización de imágenes antes del envío.
-3.  **`geminiService.ts`**: Capa de servicio. Construye el payload para la API, gestiona el Prompt Engineering y maneja errores de red/cuota.
+1.  **`App.tsx`**: Controlador principal (Orquestador). Gestiona el ciclo de vida de captura, la máquina de estados y la lógica de "silencio" (1.5s) para determinar el fin de una frase.
+2.  **`CameraFeed.tsx`**: Abstracción del hardware. Maneja el stream de video (`getUserMedia`), el análisis de movimiento con MediaPipe (solo para triggers) y la captura de alta fidelidad.
+3.  **`geminiService.ts`**: Capa de servicio. Construye el payload para la API y aplica configuraciones estrictas de inferencia para maximizar la precisión del modelo Flash.
 4.  **`ResultsDisplay.tsx`**: Capa de presentación. Renderiza los resultados con animaciones y estados de confianza.
 
 ---
 
-## 2. Estrategia de Captura: "Burst Mode" (Ráfaga)
+## 2. Estrategia de Captura: "Muestreo Temporal Dinámico"
 
-Para solucionar el problema de la detección de movimiento (señas dinámicas vs. estáticas), el sistema no envía una sola foto. Implementa una estrategia de **Muestreo Temporal**.
+A diferencia de versiones anteriores que usaban ráfagas fijas, la versión actual utiliza un **Buffer Circular Dinámico** para capturar la evolución completa del gesto.
 
-### Flujo de Captura
-En `App.tsx`, el ciclo de procesamiento (`processFrame`) ejecuta la siguiente secuencia:
+### Flujo de Captura (`App.tsx`)
+Mientras el usuario realiza señas (detectado por velocidad > umbral):
+1.  Se acumulan frames en un buffer temporal (`sessionFramesRef`).
+2.  El buffer mantiene los últimos ~25 frames (aprox. 1-2 segundos de historia).
+3.  Al detectar una pausa sostenida (1.5 segundos), se dispara el análisis.
 
-1.  **Frame T0**: Captura imagen inicial.
-2.  *Wait 80ms*: Espera optimizada.
-3.  **Frame T1**: Captura imagen intermedia.
-4.  *Wait 80ms*: Espera final.
-5.  **Frame T2**: Captura imagen final.
+### Algoritmo de Selección (4-Frame Sampling)
+Para optimizar el contexto temporal sin saturar la ventana de contexto del modelo, el sistema selecciona matemáticamente **4 frames representativos** del buffer:
+1.  **Inicio (0%):** Comienzo del gesto.
+2.  **Desarrollo Temprano (33%):** Transición.
+3.  **Desarrollo Tardío (66%):** Punto de máxima extensión o forma.
+4.  **Final (100%):** Postura final antes del reposo.
 
-*Nota:* Se redujo el tiempo de espera de 120ms a **80ms**. Esto genera una ventana de observación de ~160ms, ideal para detectar movimiento en señas rápidas sin introducir latencia excesiva que afecte la experiencia en tiempo real.
-
-### Payload Multimodal
-Las 3 imágenes se envían juntas en una sola solicitud a Gemini. Esto permite al modelo ver la "película" del gesto (aprox. 160-200ms de acción efectiva) y diferenciar entre:
-*   Mano quieta (Seña estática).
-*   Mano moviéndose de A a B (Seña dinámica).
-
----
-
-## 3. Optimización de Rendimiento (Latencia)
-
-Dado que enviamos 3 imágenes por ciclo, el ancho de banda es crítico. Se aplican optimizaciones agresivas en `CameraFeed.tsx` **antes** de enviar los datos:
-
-*   **Redimensionamiento (Downscaling):** El video (idealmente 720p/1080p) se dibuja en un Canvas de **320px de ancho**.
-    *   *Razón:* 320px es suficiente para que Gemini detecte dedos y posturas. Resoluciones mayores aumentan la latencia de subida sin mejorar significativamente la precisión semántica.
-*   **Compresión JPEG:** Se utiliza calidad `0.5` (50%).
-    *   *Razón:* Balance óptimo entre artefactos de compresión y tamaño de archivo (payload ligero).
+Esto permite a Gemini entender la trayectoria del movimiento (Parámetro "Movement" del ASL) mejor que una sola foto.
 
 ---
 
-## 4. Gestión de Contexto (Memoria Semántica)
+## 3. Optimización de Alta Fidelidad
 
-Para lograr frases coherentes ("Hola" + "Yo" + "Quiero" -> "Hola, yo quiero..."), el sistema mantiene un estado de memoria.
+Para compensar el uso de un modelo más ligero (Flash) frente a un modelo Pro, hemos aumentado la calidad de la entrada visual.
 
-### Lógica de "Prompt Engineering" (`geminiService.ts`)
-El prompt enviado a Gemini incluye:
-1.  **Input Visual:** Las 3 imágenes de la ráfaga.
-2.  **Input Textual (Contexto):** El texto traducido hasta el momento (`previousContext`).
-
-### Reglas del Sistema (System Instructions)
-El modelo sigue reglas estrictas para evitar alucinaciones y "mezclas" incorrectas:
-
-*   **APPEND vs MERGE:**
-    *   Si la nueva seña tiene sentido gramatical con lo anterior, se fusiona.
-    *   Si es una idea nueva, se separa con puntuación (punto seguido).
-*   **Anti-Repetición:** Si el usuario mantiene la mano levantada (mismo gesto que el ciclo anterior), el modelo devuelve el contexto sin cambios (HOLD).
-*   **Corrección:** Detección de gestos de negación (sacudir cabeza/mano) para borrar la última palabra.
+### Especificaciones de Imagen (`CameraFeed.tsx`)
+*   **Resolución:** **480px de ancho** (Aumentado desde 320px).
+    *   *Razón:* Flash necesita más píxeles para distinguir configuraciones de dedos complejas (ej. diferencia entre 'M', 'N' y 'T').
+*   **Compresión JPEG:** Calidad **0.7** (70%).
+    *   *Razón:* Menos artefactos de compresión alrededor de los dedos para mejorar la detección de bordes.
 
 ---
 
-## 5. Manejo de Errores y Cuotas
+## 4. Configuración del Modelo (Precision Engineering)
 
-La API de Gemini tiene límites de velocidad (Rate Limits). La aplicación maneja robustamente los errores `429` (Too Many Requests):
+En `geminiService.ts`, forzamos al modelo `gemini-2.5-flash` a comportarse de manera determinista y analítica, evitando la "creatividad" habitual de los LLMs.
 
-1.  Detecta el error en `geminiService`.
-2.  `App.tsx` entra en estado `isRateLimited`.
-3.  La UI muestra una alerta "API Limit reached".
-4.  El sistema pausa automáticamente el ciclo de captura por 10 segundos (Backoff) antes de reintentar, protegiendo la cuota del usuario.
+### Parámetros de Inferencia
+*   **`temperature: 0.1`**: Valor extremadamente bajo. Fuerza al modelo a elegir la traducción más probable estadísticamente, eliminando alucinaciones.
+*   **`topK: 32`**: Restringe el vocabulario de salida a las 32 opciones más probables.
+*   **`topP: 0.8`**: Nucleus sampling estricto.
+
+### Prompt de Sistema (System Instructions)
+Instruimos al modelo para analizar explícitamente los **5 Parámetros del ASL**:
+1.  **Handshape** (Forma de la mano).
+2.  **Orientation** (Orientación de la palma).
+3.  **Location** (Ubicación respecto al cuerpo).
+4.  **Movement** (Trayectoria).
+5.  **Non-Manual Markers** (Expresión facial).
 
 ---
 
-## 6. Stack Tecnológico
+## 5. Gestión de Contexto (Memoria Semántica)
+
+Para lograr frases coherentes, el sistema envía el contexto previo junto con las nuevas imágenes.
+
+*   **Input Visual:** 4 imágenes (Payload actual).
+*   **Input Textual:** "Previous Context: [Texto acumulado]".
+
+**Regla de Fusión:** Si la nueva seña complementa gramaticalmente a la anterior (ej. "Yo" -> "Quiero"), el modelo devuelve la frase unida ("Yo quiero"). Si detecta un cambio de tema, añade puntuación.
+
+---
+
+## 6. Manejo de Errores y Cuotas
+
+1.  **Backoff Exponencial:** Si la API devuelve `429` (Too Many Requests), la UI muestra una alerta amarilla y el sistema pausa la captura por 10 segundos.
+2.  **Filtro de Ruido:** Si la traducción resultante es "..." o vacía (significando que el modelo no vio una seña clara), el sistema la descarta y no actualiza la UI, manteniendo la experiencia limpia.
+
+---
+
+## 7. Stack Tecnológico
 
 *   **Frontend Library:** React 19.
-*   **AI SDK:** `@google/genai` (SDK oficial para Gemini 1.5/2.5).
-*   **Estilos:** Tailwind CSS (Diseño responsivo y efectos neón).
-*   **Build Tool:** Vite (implícito en el entorno).
-
-## 7. Modo Demo vs Producción
-
-En `geminiService.ts`, existe una constante `IS_DEMO_MODE`.
-*   **TRUE:** Simula respuestas predefinidas basadas en tiempo para grabar videos promocionales sin gastar API.
-*   **FALSE:** Conecta a la API real para uso en producción.
+*   **AI SDK:** `@google/genai` (v1.32.0).
+*   **Visión Computacional (Cliente):** MediaPipe Tasks Vision (para detección de *presencia* de manos y cálculo de velocidad, no para traducción).
+*   **Visión Computacional (Servidor):** Gemini 2.5 Flash Multimodal.
+*   **Estilos:** Tailwind CSS.
 
 ---
 

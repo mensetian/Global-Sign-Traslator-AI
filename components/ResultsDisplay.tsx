@@ -25,7 +25,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ result, appState, langC
     }
   }, [result?.traduccion, hasResult]);
 
-  const isHighConfidence = result?.confianza_modelo === 'High' || result?.confianza_modelo === 'Alta';
+  // Case-insensitive confidence check
+  const confidence = result?.confianza_modelo?.toLowerCase() || 'low';
+  const isHighConfidence = confidence === 'high' || confidence === 'alta';
 
   // Dynamic Styles
   const borderColor = hasResult 

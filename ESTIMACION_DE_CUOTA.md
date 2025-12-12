@@ -1,88 +1,67 @@
-# Estimación de Cuota y Costos: Global Sign Translator
+# Estimación de Cuota y Costos: Global Sign Translator (Flash Edition)
 
-Este documento detalla el consumo de recursos de la API de Google Gemini (modelo `gemini-2.5-flash`) basado en la arquitectura actual de la aplicación (Ráfaga de 3 imágenes + Detección de manos en cliente).
+Este documento detalla el consumo de recursos utilizando el modelo **`gemini-2.5-flash`** con la arquitectura de "Flujo Continuo" optimizada.
+
+> **ESTADO ACTUAL:** Configuración de alta eficiencia. Máxima precisión posible al menor costo.
 
 ---
 
 ## 1. Desglose por Petición (Request)
 
-Cada vez que la aplicación detecta manos y decide traducir, envía una "Petición". Esta petición se compone de:
+El sistema utiliza un sistema de muestreo dinámico que se activa solo después de detectar movimiento y confirmar una pausa.
 
 ### A. Costo de Entrada (Input Tokens)
-*   **Imágenes:** Enviamos 3 imágenes (frames) por petición.
-    *   Gemini 2.5 Flash consume aproximadamente **258 tokens por imagen** estándar.
-    *   3 imágenes x 258 tokens = **774 tokens**.
-*   **Texto (Prompt + Contexto):**
-    *   Instrucciones del sistema + Historial de contexto breve + JSON Schema.
+*   **Imágenes:** 4 frames a **480px** (Alta Calidad para precisión de dedos).
+    *   Tokenización Multimodal: ~258 tokens por imagen.
+    *   4 imágenes x 258 tokens = **1,032 tokens**.
+*   **Texto:**
+    *   Instrucciones del sistema + Historial de contexto.
     *   Estimación promedio: **~300 tokens**.
 
-**Total por Petición:** ~1,074 Tokens.
+**Total por Petición:** ~1,332 Tokens.
 
 ### B. Costo de Salida (Output Tokens)
-*   La respuesta es un JSON pequeño (`{"traduccion": "...", "confianza": "..."}`).
-*   Estimación promedio: **~40 tokens**.
+*   La respuesta es un JSON estricto.
+*   Estimación promedio: **~30-40 tokens**.
 
 ---
 
-## 2. Escenarios de Uso
+## 2. Escenarios de Uso (Free Tier)
 
-### Escenario A: Usuario inactivo (Sin manos en cámara)
-Gracias a la implementación de **MediaPipe** en el cliente:
-*   **Consumo:** 0 Tokens.
-*   **Peticiones:** 0 RPM (Requests Per Minute).
-*   **Costo:** $0.00.
+El plan gratuito de Google AI Studio es extremadamente generoso para este modelo.
 
-### Escenario B: Usuario activo (Haciendo señas continuamente)
-La aplicación tiene un retraso de seguridad (`minimumDelay`) de 2.5 segundos + tiempo de inferencia (~1s).
-*   **Frecuencia:** Aprox. 1 petición cada 3.5 - 4 segundos.
-*   **Ritmo (RPM):** ~15 a 17 Peticiones por minuto.
-
----
-
-## 3. Análisis: Plan Gratuito (Free Tier)
-
-El plan gratuito de Google AI Studio tiene límites estrictos.
-
-| Límite | Valor | Consumo de la App (Activa) | Estado |
+| Límite | Valor | Consumo App | Estado |
 | :--- | :--- | :--- | :--- |
-| **RPM (Peticiones/min)** | 15 RPM | ~15-17 RPM | **Al límite** (La app pausa si se excede) |
-| **TPM (Tokens/min)** | 1 Millón TPM | ~18,000 TPM | Seguro (Muy por debajo) |
-| **RPD (Peticiones/día)** | 1,500 RPD | - | Ver cálculo abajo |
+| **RPM (Peticiones/min)** | 15 RPM | **~8 - 10 RPM** | **Seguro** ✅ |
+| **TPM (Tokens/min)** | 1 Millón TPM | ~13,500 TPM | Muy bajo |
+| **RPD (Peticiones/día)** | 1,500 RPD | - | Ver abajo |
 
-### ¿Cuánto tiempo puedo usar la app gratis al día?
-Con un límite de 1,500 peticiones al día y un ritmo de 15 peticiones por minuto:
-$$ 1,500 \text{ peticiones} / 15 \text{ RPM} = 100 \text{ minutos} $$
-
-**Conclusión Free Tier:** Puedes usar la aplicación de forma continua durante **1 hora y 40 minutos al día** sin pagar nada. Si excedes las 15 peticiones en un solo minuto, la app mostrará la alerta amarilla y pausará 10 segundos.
+### Duración de Uso Gratuito Diario
+Gracias al temporizador de "silencio" de 1.5 segundos que actúa como regulador natural:
+$$ 1,500 \text{ peticiones} / 9 \text{ RPM} \approx 2 \text{ horas y 45 minutos diarios de conversación continua.} $$
 
 ---
 
-## 4. Análisis: Plan de Pago (Pay-as-you-go)
+## 3. Análisis: Plan de Pago (Pay-as-you-go)
 
-Si vinculas una cuenta de facturación de Google Cloud, los límites de RPM aumentan drásticamente (a miles) y pagas por uso.
+Si necesitas más de 3 horas diarias, el costo es trivial.
 
-**Precios Estimados (Gemini 1.5/2.5 Flash):**
-*   **Input (Imágenes/Texto):** $0.075 USD por 1 millón de tokens.
-*   **Output (Respuesta):** $0.30 USD por 1 millón de tokens.
+**Precios (Gemini 2.5 Flash):**
+*   Input: $0.075 / 1M tokens.
+*   Output: $0.30 / 1M tokens.
 
 ### Costo por Hora de Uso Continuo
-1.  **Tokens de Entrada en 1 hora:**
-    *   15 RPM x 60 min = 900 peticiones.
-    *   900 peticiones x 1,074 tokens = **966,600 tokens**.
-    *   Costo Input: ~$0.072 USD.
-2.  **Tokens de Salida en 1 hora:**
-    *   900 peticiones x 40 tokens = 36,000 tokens.
-    *   Costo Output: ~$0.00001 USD (despreciable).
+1.  **Tokens de Entrada en 1 hora (60 min x 9 RPM):**
+    *   540 peticiones x 1,332 tokens = **719,280 tokens**.
+    *   Costo Input: ~$0.054 USD.
 
-**Costo Total Estimado:** **$0.07 - $0.08 USD por hora** de traducción continua.
+**Costo Total Estimado:** **~$0.05 - $0.06 USD por hora**.
 
 ---
 
-## 5. Resumen Ejecutivo
+## 4. Resumen de Ingeniería
 
-*   **Para Desarrollo/Hobby:** El plan gratuito es suficiente (permite ~1.5 horas de uso diario). La protección contra errores 429 implementada en la app gestiona los picos de uso.
-*   **Para Producción Comercial:** El costo es extremadamente bajo. Con $1.00 USD podrías dar servicio de traducción continua durante aproximadamente **12 a 13 horas**.
-
-### Recomendaciones para Optimizar
-1.  **Ajustar `minimumDelay`:** Si subes el retraso en `App.tsx` de 2500ms a 4000ms, bajarás las RPM a ~12, asegurando que nunca toques el límite gratuito, aunque la traducción se sentirá un poco menos fluida.
-2.  **Modo de Espera:** La detección de manos de MediaPipe es la mayor optimización actual, ahorrando el 100% de la cuota cuando el usuario no está firmando activamente.
+Hemos logrado un equilibrio ideal:
+1.  **Input de Alta Calidad:** Usamos imágenes de 480px (mejor que el estándar 320px) para que el modelo "Flash" vea mejor los detalles.
+2.  **Modelo Económico:** Usamos `gemini-2.5-flash` para mantener el costo casi nulo.
+3.  **Lógica Inteligente:** El código fuerza la precisión bajando la `temperature` a 0.1 y usando `topK` para evitar alucinaciones.
