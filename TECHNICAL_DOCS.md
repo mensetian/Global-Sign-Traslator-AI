@@ -1,6 +1,6 @@
 # Technical Documentation: Global Sign Translator
 
-This document outlines the technical architecture, data flow, and engineering decisions behind the **Global Sign Translator**. The system utilizes Multimodal Artificial Intelligence (Vision + Text) to translate sign language in real-time, optimized for the **Gemini 2.5 Flash** model.
+This document outlines the technical architecture, data flow, and engineering decisions behind the **Global Sign Translator**. The system utilizes Multimodal Artificial Intelligence (Vision + Text) to translate sign language in real-time, optimized for the **Gemini 3 Flash Preview** model.
 
 ---
 
@@ -12,7 +12,7 @@ The application is a Single Page Application (SPA) built with **React 19** and *
 
 1.  **`App.tsx`**: Main Controller (Orchestrator). Manages the capture lifecycle, state machine, and "silence" logic (1.5s) to determine the end of a sentence.
 2.  **`CameraFeed.tsx`**: Hardware Abstraction. Handles the video stream (`getUserMedia`), motion analysis with MediaPipe (strictly for triggers), and high-fidelity frame capture.
-3.  **`geminiService.ts`**: Service Layer. Constructs the API payload and applies strict inference configurations to maximize Flash model precision.
+3.  **`geminiService.ts`**: Service Layer. Constructs the API payload and applies strict inference configurations to maximize **Gemini 3** model precision.
 4.  **`ResultsDisplay.tsx`**: Presentation Layer. Renders results with animations and confidence states.
 
 ---
@@ -44,7 +44,7 @@ To compensate for using a lighter model (Flash) versus a Pro model, we have incr
 
 ### Image Specifications (`CameraFeed.tsx`)
 *   **Resolution:** **480px width** (Increased from 320px).
-    *   *Reasoning:* Flash requires more pixels to distinguish complex finger configurations (e.g., the difference between 'M', 'N', and 'T').
+    *   *Reasoning:* Higher resolution allows the model to distinguish complex finger configurations (e.g., the difference between 'M', 'N', and 'T').
 *   **JPEG Compression:** Quality **0.7** (70%).
     *   *Reasoning:* Fewer compression artifacts around fingers to improve edge detection.
 
@@ -52,7 +52,7 @@ To compensate for using a lighter model (Flash) versus a Pro model, we have incr
 
 ## 4. Model Configuration (Precision Engineering)
 
-In `geminiService.ts`, we force the `gemini-2.5-flash` model to behave deterministically and analytically, avoiding the typical "creativity" of LLMs.
+In `geminiService.ts`, we force the `gemini-3-flash-preview` model to behave deterministically and analytically, avoiding the typical "creativity" of LLMs.
 
 ### Inference Parameters
 *   **`temperature: 0.1`**: Extremely low value. Forces the model to choose the statistically most probable translation, eliminating hallucinations.
@@ -92,7 +92,7 @@ To achieve coherent sentences, the system sends previous context along with new 
 *   **Frontend Library:** React 19.
 *   **AI SDK:** `@google/genai` (v1.32.0).
 *   **Computer Vision (Client):** MediaPipe Tasks Vision (for hand *presence* detection and velocity calculation, not for translation).
-*   **Computer Vision (Server):** Gemini 2.5 Flash Multimodal.
+*   **Computer Vision (Server):** Gemini 3 Flash Preview Multimodal.
 *   **Styling:** Tailwind CSS.
 
 ---

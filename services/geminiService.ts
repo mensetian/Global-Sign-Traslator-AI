@@ -3,8 +3,8 @@ import { TranslationResult } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// PROMPT OPTIMIZADO PARA GEMINI 2.5 FLASH
-// Flash es rápido pero necesita instrucciones muy directas para no alucinar.
+// PROMPT OPTIMIZADO PARA GEMINI 3 FLASH PREVIEW
+// Gemini 3 Flash ofrece una capacidad de razonamiento superior manteniendo la baja latencia.
 const SYSTEM_INSTRUCTION = `
 You are a Sign Language Interpreter.
 INPUT: 4 sequential video frames + Previous Context.
@@ -65,15 +65,15 @@ Translate.`
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', 
+      model: 'gemini-3-flash-preview', 
       contents: { parts: contentsParts },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
-        // AJUSTES DE PRECISIÓN PARA FLASH
-        temperature: 0.1, // Muy baja para evitar creatividad/alucinaciones
-        topK: 32, // Restringir el espacio de búsqueda
-        topP: 0.8, // Núcleo de probabilidad más estricto
+        // AJUSTES DE PRECISIÓN
+        temperature: 0.1, 
+        topK: 32, 
+        topP: 0.8, 
         responseSchema: {
           type: Type.OBJECT,
           properties: {

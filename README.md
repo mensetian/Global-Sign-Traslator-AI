@@ -5,7 +5,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![React](https://img.shields.io/badge/React-19-blue)
-![Gemini](https://img.shields.io/badge/Google%20AI-Gemini%202.5%20Flash-orange)
+![Gemini](https://img.shields.io/badge/Google%20AI-Gemini%203%20Flash-orange)
 
 Google AI Studio: https://ai.studio/apps/drive/1LsNrxOIlHoZ2JK9W_GGyjra0KHWk2MFd
 
@@ -29,16 +29,16 @@ Unlike traditional classifiers that only recognize static images (A, B, C...), t
 
 *   **Frontend:** React 19, TypeScript
 *   **Styling:** Tailwind CSS (Neon/Cyberpunk aesthetic)
-*   **AI Model:** Google Gemini 2.5 Flash (via `@google/genai` SDK)
+*   **AI Model:** Google Gemini 3 Flash Preview (via `@google/genai` SDK)
 *   **Hardware Access:** Native WebRTC (`navigator.mediaDevices`)
 
-### 🧠 Why Gemini 2.5 Flash?
+### 🧠 Why Gemini 3 Flash Preview?
 
-We deliberately chose **`gemini-2.5-flash`** as our core engine. Here is the engineering reasoning:
+We upgraded to **`gemini-3-flash-preview`** to leverage the latest advances in efficiency and multimodal reasoning.
 
-1.  **Cost Efficiency:** At ~$0.05/hour of continuous use, it is 50x cheaper than Pro models, making accessible technology affordable for everyone.
-2.  **Latency is King:** For a real-time translator, the user experience depends on immediate feedback. The "Flash" model family is architected for **high throughput**.
-3.  **Precision Engineering:** We compensate for the smaller model size by feeding it higher resolution images (480px) and using strict temperature controls (0.1) to prevent hallucinations.
+1.  **State-of-the-Art Speed:** Gemini 3 Flash is architected for extremely low latency, critical for live translation.
+2.  **Enhanced Reasoning:** The newer architecture handles complex sentence structures and contextual merging with higher accuracy than previous generations.
+3.  **Precision Engineering:** We feed the model high-resolution frames (480px) and use strict temperature controls (0.1) to ensure deterministic and accurate translations.
 
 ---
 

@@ -1,8 +1,6 @@
-# Quota & Cost Estimation: Global Sign Translator (Flash Edition)
+# Quota & Cost Estimation: Global Sign Translator (Gemini 3 Edition)
 
-This document details resource consumption using the **`gemini-2.5-flash`** model with the optimized "Continuous Flow" architecture.
-
-> **CURRENT STATUS:** High-efficiency configuration. Maximum possible precision at the lowest cost.
+This document details resource consumption using the **`gemini-3-flash-preview`** model with the optimized "Continuous Flow" architecture.
 
 ---
 
@@ -12,7 +10,7 @@ The system uses a dynamic sampling system that triggers only after detecting mov
 
 ### A. Input Cost (Input Tokens)
 *   **Images:** 4 frames at **480px** (High Quality for finger precision).
-    *   Multimodal Tokenization: ~258 tokens per image.
+    *   Multimodal Tokenization: ~258 tokens per image (Gemini 3 architecture).
     *   4 images x 258 tokens = **1,032 tokens**.
 *   **Text:**
     *   System instructions + Context history.
@@ -28,27 +26,23 @@ The system uses a dynamic sampling system that triggers only after detecting mov
 
 ## 2. Usage Scenarios (Free Tier)
 
-The Google AI Studio free tier is extremely generous for this model.
+The Google AI Studio free tier for Gemini 3 Flash Preview is designed for testing and individual use.
 
 | Limit | Value | App Consumption | Status |
 | :--- | :--- | :--- | :--- |
 | **RPM (Requests/min)** | 15 RPM | **~8 - 10 RPM** | **Safe** ✅ |
 | **TPM (Tokens/min)** | 1 Million TPM | ~13,500 TPM | Very Low |
-| **RPD (Requests/day)** | 1,500 RPD | - | See below |
-
-### Daily Free Usage Duration
-Thanks to the 1.5-second "silence" timer acting as a natural regulator:
-$$ 1,500 \text{ requests} / 9 \text{ RPM} \approx 2 \text{ hours and 45 minutes of continuous conversation daily.} $$
+| **RPD (Requests/day)** | 1,500 RPD | - | High Capacity |
 
 ---
 
-## 3. Analysis: Pay-as-you-go Plan
+## 3. Pay-as-you-go Plan (Estimated)
 
-If you require more than 3 hours daily, the cost is trivial.
+If usage exceeds free tier limits, the "Flash" family remains the most cost-effective option.
 
-**Pricing (Gemini 2.5 Flash):**
-*   Input: $0.075 / 1M tokens.
-*   Output: $0.30 / 1M tokens.
+**Standard Pricing (Gemini 3 Flash):**
+*   Input: ~$0.075 / 1M tokens.
+*   Output: ~$0.30 / 1M tokens.
 
 ### Cost per Hour of Continuous Usage
 1.  **Input Tokens in 1 hour (60 min x 9 RPM):**
@@ -62,6 +56,6 @@ If you require more than 3 hours daily, the cost is trivial.
 ## 4. Engineering Summary
 
 We have achieved an ideal balance:
-1.  **High-Quality Input:** We use 480px images (better than the standard 320px) so the "Flash" model sees details better.
-2.  **Economical Model:** We use `gemini-2.5-flash` to keep costs near zero.
-3.  **Smart Logic:** The code forces precision by lowering `temperature` to 0.1 and using `topK` to prevent hallucinations.
+1.  **Upgraded Intelligence:** Using **Gemini 3 Flash Preview** provides better contextual reasoning.
+2.  **High-Quality Input:** 480px images ensure the model has enough detail for precise handshape detection.
+3.  **Smart Logic:** The system pauses for 1.5s to ensure a full gesture is captured, regulating API calls naturally.
