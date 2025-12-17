@@ -6,6 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![React](https://img.shields.io/badge/React-19-blue)
 ![Gemini](https://img.shields.io/badge/Google%20AI-Gemini%202.5%20Flash-orange)
+![Studio](https://aistudio.google.com/apps/drive/1LsNrxOIlHoZ2JK9W_GGyjra0KHWk2MFd?showPreview=true&showAssistant=true).
 
 ## 🚀 Overview
 
